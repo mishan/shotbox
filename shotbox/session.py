@@ -68,6 +68,12 @@ BUS_CONFIG = """<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Config
 """
 
 
+GTK_SETTINGS = """[Settings]
+gtk-cursor-blink = false
+gtk-enable-animations = false
+"""
+
+
 class SessionError(RuntimeError):
     pass
 
@@ -78,9 +84,11 @@ def need(*tools):
         raise SessionError("not found: " + ", ".join(missing))
 
 
-def free_display():
+def free_display(skip=()):
     """The lowest display number with neither a lock nor a socket."""
     for n in range(99, 1000):
+        if n in skip:
+            continue
         if not (Path(f"/tmp/.X{n}-lock").exists()
                 or Path(f"/tmp/.X11-unix/X{n}").exists()):
             return n
@@ -142,30 +150,45 @@ class Session:
         home.mkdir(exist_ok=True)
         for d in (".config", ".local/share", ".local/state", ".cache"):
             (home / d).mkdir(parents=True, exist_ok=True)
+        # GTK apps: no blinking text caret, which a picture would catch on
+        # or off at random, and no animations, which it would catch mid-way.
+        # A seeded home's own settings win.
+        for gtk in ("gtk-3.0", "gtk-4.0"):
+            ini = home / ".config" / gtk / "settings.ini"
+            if not ini.exists():
+                ini.parent.mkdir(parents=True, exist_ok=True)
+                ini.write_text(GTK_SETTINGS)
         run = self.scratch / "run"
         run.mkdir(mode=0o700)
 
     def _start_x(self):
-        n = free_display()
+        # Two sessions starting at once can pick the same free number; the
+        # second Xvfb then fails to take it. Move on to the next one.
         xauth = self.scratch / "Xauthority"
         xauth.touch(mode=0o600)
-        subprocess.run(["xauth", "-q", "-f", str(xauth), "add", f":{n}", ".",
-                        secrets.token_hex(16)], check=True)
-        r, w = os.pipe()
-        w_, h = self.size
-        proc = subprocess.Popen(
-            ["Xvfb", f":{n}", "-auth", str(xauth), "-displayfd", str(w),
-             "-screen", "0", f"{w_}x{h}x24", "-nolisten", "tcp", "-noreset"],
-            pass_fds=(w,), stdout=subprocess.DEVNULL,
-            stderr=open(self.scratch / "Xvfb.log", "wb"),
-            start_new_session=True)
-        os.close(w)
-        self._procs.append(proc)
-        with os.fdopen(r) as f:
-            got = f.readline().strip()   # blocks until Xvfb is listening
-        if not got:
-            raise SessionError("Xvfb didn't start; see " + str(self.scratch / "Xvfb.log"))
-        return f":{got}", xauth
+        cookie = secrets.token_hex(16)
+        taken = set()
+        for _ in range(20):
+            n = free_display(skip=taken)
+            taken.add(n)
+            subprocess.run(["xauth", "-q", "-f", str(xauth), "add", f":{n}", ".", cookie],
+                           check=True)
+            r, w = os.pipe()
+            w_, h = self.size
+            proc = subprocess.Popen(
+                ["Xvfb", f":{n}", "-auth", str(xauth), "-displayfd", str(w),
+                 "-screen", "0", f"{w_}x{h}x24", "-nolisten", "tcp", "-noreset"],
+                pass_fds=(w,), stdout=subprocess.DEVNULL,
+                stderr=open(self.scratch / "Xvfb.log", "wb"),
+                start_new_session=True)
+            os.close(w)
+            with os.fdopen(r) as f:
+                got = f.readline().strip()   # blocks until Xvfb listens or exits
+            if got:
+                self._procs.append(proc)
+                return f":{got}", xauth
+            proc.wait()
+        raise SessionError("Xvfb didn't start; see " + str(self.scratch / "Xvfb.log"))
 
     def _start_bus(self, kind):
         services = self.scratch / f"{kind}-services"

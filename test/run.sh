@@ -57,6 +57,18 @@ st=$?; set -e
 [ $st != 0 ] && grep -q "exited\|gave up" "$tmp/err" && ok "a step that never comes fails, saying why" \
   || fail "a stuck step: status $st"
 
+# Input: a click for focus, typed text with shifted symbols, and chords.
+"$sb" run -- sh -c "
+  '$sb' term --size 40x6 --log '$tmp/input.log' -- sh -c cat & t=\$!
+  '$sb' wait window shotbox-term && sleep 0.5 &&
+  '$sb' click 20 20 --window shotbox-term &&
+  '$sb' type 'Hi, you! 1+1=2 ~/a_b <x>' && '$sb' key Return ctrl+d
+  st=\$?; sleep 0.5; kill \$t 2>/dev/null; exit \$st" \
+  && grep -aq 'Hi, you! 1+1=2 ~/a_b <x>' "$tmp/input.log" \
+  && ok "click, type and key reach the program" || fail "input"
+set +e; "$sb" key ctrl+comma 2>/dev/null; st=$?; set -e
+[ $st != 0 ] && ok "input needs a session" || fail "key ran outside a session"
+
 # Compare.
 "$sb" compare "$tmp/a.png" "$tmp/b.png" >/dev/null && ok "compare: the same" || fail "compare same"
 convert "$tmp/a.png" -fill red -draw 'point 3,3' "$tmp/d.png"

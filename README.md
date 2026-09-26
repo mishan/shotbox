@@ -27,7 +27,8 @@ right all want the same things, and every project was growing its own copy:
 - **Ready, not slept.** Waits are for things: a window mapped, a port open, a
   file written, or text on a terminal's screen. No `sleep 6` and hope.
 - **Deterministic.** X11 on Xvfb, GTK's software renderer, `LANG=C.UTF-8`,
-  `TZ=UTC`, a cursor that doesn't blink, and PNGs with no timestamps in them.
+  `TZ=UTC`, a cursor that doesn't blink (GTK's text caret included, and GTK's
+  animations off), and PNGs with no timestamps in them.
 - **Cleaned up.** Every program runs in its own process group, and the group
   is killed on the way out: signalling a wrapper script alone leaves its
   children running.
@@ -61,6 +62,13 @@ sealed session, waits, takes the picture and stops everything.
 and exits with its status. For scripts that take several pictures: inside,
 `shotbox wait window|port|file|ready ARG` and `shotbox capture OUT.png
 [--window RE] [--crop G]` work on the session's display.
+
+Inside, `shotbox key CHORD...` presses keys (`ctrl+comma`, `Return`,
+`alt+shift+Tab`), `shotbox type TEXT` types ASCII text, and `shotbox click
+X Y`, `shotbox move X Y` and `shotbox drag X1 Y1 X2 Y2` work the pointer,
+at a point on the screen or, with `--window RE`, inside a window (`click
+--button 3`, `--double`). They
+speak XTEST to the display directly, so there's still nothing to install.
 
 Both take the session options: `--screen WxH` (1280x800); `--env NAME=VALUE`
 and `--pass NAME` to set or let through variables; `--seed DIR` to start the
