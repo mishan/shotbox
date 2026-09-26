@@ -5,6 +5,11 @@
     shotbox term [options] -- COMMAND...            a terminal to take pictures of
     shotbox wait window|port|file|ready ARG         (inside a session) wait for it
     shotbox capture OUT.png [--window RE]           (inside a session) take a picture
+    shotbox key CHORD...                            (inside a session) press keys
+    shotbox type TEXT                               (inside a session) type text
+    shotbox click X Y [--window RE]                 (inside a session) click there
+    shotbox move X Y [--window RE]                  (inside a session) point there
+    shotbox drag X1 Y1 X2 Y2 [--window RE]          (inside a session) drag
     shotbox compare A.png B.png [--diff D.png]      how many pixels differ
 
 `shotbox COMMAND --help` for each one's options.
@@ -16,7 +21,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import term, x
+from . import term, x, xtest
 from .session import Session, SessionError, wait_for
 
 
@@ -188,6 +193,87 @@ def cmd_capture(argv):
     return 0
 
 
+def cmd_key(argv):
+    p = argparse.ArgumentParser(prog="shotbox key",
+                                description="Inside `shotbox run`: press and release each "
+                                            "chord in turn, e.g. ctrl+comma, Return, "
+                                            "alt+shift+Tab.")
+    p.add_argument("chords", nargs="+", metavar="CHORD")
+    a = p.parse_args(argv)
+    env, _ = inside()
+    with xtest.Display(env) as d:
+        for c in a.chords:
+            d.chord(c)
+    return 0
+
+
+def cmd_type(argv):
+    p = argparse.ArgumentParser(prog="shotbox type",
+                                description="Inside `shotbox run`: type text into whatever "
+                                            "has the keyboard focus.")
+    p.add_argument("text")
+    a = p.parse_args(argv)
+    env, _ = inside()
+    with xtest.Display(env) as d:
+        d.type(a.text)
+    return 0
+
+
+def where(a, env):
+    """The point to act on: X, Y on the screen, or inside --window."""
+    if not a.window:
+        return a.x, a.y
+    w = x.find_window(env, a.window)
+    if not w:
+        raise SessionError(f"no window named {a.window!r}")
+    return w[4] + a.x, w[5] + a.y
+
+
+def pointer_command(name, what):
+    def cmd(argv):
+        p = argparse.ArgumentParser(prog=f"shotbox {name}",
+                                    description=f"Inside `shotbox run`: {what}.")
+        p.add_argument("x", type=int)
+        p.add_argument("y", type=int)
+        p.add_argument("--window", metavar="RE",
+                       help="X and Y are inside this window rather than the screen")
+        if name == "click":
+            p.add_argument("--button", type=int, default=1, help="1 left, 2 middle, 3 right")
+            p.add_argument("--double", action="store_true", help="click twice")
+        a = p.parse_args(argv)
+        env, _ = inside()
+        px, py = where(a, env)
+        with xtest.Display(env) as d:
+            if name == "click":
+                d.click(px, py, button=a.button, count=2 if a.double else 1)
+            else:
+                d.move(px, py)
+        return 0
+    return cmd
+
+
+def cmd_drag(argv):
+    p = argparse.ArgumentParser(prog="shotbox drag",
+                                description="Inside `shotbox run`: press at X1 Y1, move to "
+                                            "X2 Y2, release: a divider, a slider, a drop.")
+    for n in ("x1", "y1", "x2", "y2"):
+        p.add_argument(n, type=int)
+    p.add_argument("--window", metavar="RE",
+                   help="the points are inside this window rather than the screen")
+    p.add_argument("--button", type=int, default=1)
+    a = p.parse_args(argv)
+    env, _ = inside()
+    dx = dy = 0
+    if a.window:
+        w = x.find_window(env, a.window)
+        if not w:
+            raise SessionError(f"no window named {a.window!r}")
+        dx, dy = w[4], w[5]
+    with xtest.Display(env) as d:
+        d.drag(a.x1 + dx, a.y1 + dy, a.x2 + dx, a.y2 + dy, button=a.button)
+    return 0
+
+
 def cmd_compare(argv):
     p = argparse.ArgumentParser(prog="shotbox compare",
                                 description="Count the pixels that differ between two "
@@ -208,7 +294,10 @@ def cmd_compare(argv):
 
 
 COMMANDS = {"run": cmd_run, "shoot": cmd_shoot, "term": term.main, "wait": cmd_wait,
-            "capture": cmd_capture, "compare": cmd_compare}
+            "capture": cmd_capture, "compare": cmd_compare, "key": cmd_key,
+            "type": cmd_type, "click": pointer_command("click", "move the pointer and click"),
+            "move": pointer_command("move", "move the pointer, for a hover"),
+            "drag": cmd_drag}
 
 
 def main(argv=None):
@@ -218,7 +307,7 @@ def main(argv=None):
         return 0 if not argv or argv[0] in ("-h", "--help") else 2
     try:
         return COMMANDS[argv[0]](argv[1:])
-    except SessionError as e:
+    except (SessionError, xtest.XError) as e:
         sys.stderr.write(f"shotbox: {e}\n")
         return 1
 
