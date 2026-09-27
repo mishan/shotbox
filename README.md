@@ -25,7 +25,8 @@ right all want the same things, and every project was growing its own copy:
   start behind your back. Settings are in-memory, so apps come up with their
   own defaults, not yours.
 - **Ready, not slept.** Waits are for things: a window mapped, a port open, a
-  file written, or text on a terminal's screen. No `sleep 6` and hope.
+  file written, text on a terminal's screen, or the picture holding still.
+  No `sleep 6` and hope.
 - **Deterministic.** X11 on Xvfb, GTK's software renderer, `LANG=C.UTF-8`,
   `TZ=UTC`, a cursor that doesn't blink (GTK's text caret included, and GTK's
   animations off), and PNGs with no timestamps in them.
@@ -52,16 +53,24 @@ sealed session, waits, takes the picture and stops everything.
 
 - `--window RE` takes that window (its name, a regex matched in full) rather
   than the whole display, and waits for it to appear.
-- `--wait window:RE|port:N|file:PATH|ready` waits for more (repeatable).
-  `ready` is `$SHOTBOX_SCRATCH/ready` existing; `shotbox term` writes it.
+- `--wait window:RE|port:N|file:PATH|ready|stable[:SECS]` waits for more
+  (repeatable, in order). `ready` is `$SHOTBOX_SCRATCH/ready` existing;
+  `shotbox term` writes it. `stable` is the `--window` (or the whole display)
+  looking the same for SECS (0.5): for a program with no other sign it's
+  done drawing.
 - `--crop WxH+X+Y`, `--settle SECS` (0.3), `--timeout SECS` (30),
   `--log FILE` for the program's output. If a wait fails or the program
-  dies, it says which and shows the program's last output.
+  dies, it says which, shows the program's last output, and leaves a
+  picture of the screen as it was beside OUT, as `OUT-failed.png`
+  (`--failed FILE` for elsewhere).
 
 **`shotbox run [options] -- COMMAND...`** runs a command in a sealed session
 and exits with its status. For scripts that take several pictures: inside,
-`shotbox wait window|port|file|ready ARG` and `shotbox capture OUT.png
-[--window RE] [--crop G]` work on the session's display.
+`shotbox wait window|port|file|ready|stable ARG` and `shotbox capture OUT.png
+[--window RE] [--crop G]` work on the session's display. `shotbox wait
+stable [SECS] [--window RE]` is the one to use after a click, in place of a
+sleep. A wait that gives up takes a picture of the screen with `--failed
+FILE`, or wherever `$SHOTBOX_FAILED` says (`--env SHOTBOX_FAILED=...`).
 
 Inside, `shotbox key CHORD...` presses keys (`ctrl+comma`, `Return`,
 `alt+shift+Tab`), `shotbox type TEXT` types ASCII text, and `shotbox click

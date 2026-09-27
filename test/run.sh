@@ -56,6 +56,23 @@ set +e
 st=$?; set -e
 [ $st != 0 ] && grep -q "exited\|gave up" "$tmp/err" && ok "a step that never comes fails, saying why" \
   || fail "a stuck step: status $st"
+[ -s "$tmp/c-failed.png" ] && grep -q "c-failed.png" "$tmp/err" \
+  && ok "a failed shoot leaves a picture of the screen" || fail "no -failed.png"
+
+# Stable: waits out a burst of output, and gives up on output that never stops.
+"$sb" run -- sh -c "
+  '$sb' term --size 30x5 --log '$tmp/burst.log' -- \
+    bash --norc -c 'for i in 1 2 3 4 5 6 7 8; do echo \$i; sleep 0.2; done; echo over; sleep 60' &
+  '$sb' wait window shotbox-term && '$sb' wait stable --window shotbox-term" \
+  && grep -aq '^over' "$tmp/burst.log" && ok "stable waits for the screen to stop changing" \
+  || fail "stable came early"
+set +e
+"$sb" run -- sh -c "
+  '$sb' term --size 30x5 -- bash --norc -c 'while :; do date +%N; sleep 0.1; done' &
+  '$sb' wait window shotbox-term && '$sb' wait stable --timeout 2 --failed '$tmp/busy.png'" 2> "$tmp/err"
+st=$?; set -e
+[ $st != 0 ] && grep -q "hold still" "$tmp/err" && [ -s "$tmp/busy.png" ] \
+  && ok "stable gives up on a busy screen, with a picture of it" || fail "busy: status $st"
 
 # Input: a click for focus, typed text with shifted symbols, and chords.
 "$sb" run -- sh -c "

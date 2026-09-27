@@ -3,7 +3,7 @@
     shotbox shoot OUT.png [options] -- COMMAND...   run it, wait, take the picture
     shotbox run [options] -- COMMAND...             run it in a sealed session
     shotbox term [options] -- COMMAND...            a terminal to take pictures of
-    shotbox wait window|port|file|ready ARG         (inside a session) wait for it
+    shotbox wait window|port|file|ready|stable ARG  (inside a session) wait for it
     shotbox capture OUT.png [--window RE]           (inside a session) take a picture
     shotbox key CHORD...                            (inside a session) press keys
     shotbox type TEXT                               (inside a session) type text
@@ -79,7 +79,9 @@ def cmd_run(argv):
         return s.run(cmd)
 
 
-def waiter(spec, env, scratch, proc):
+def waiter(spec, env, scratch, proc, window=None):
+    """What to say, and the test to poll, for a wait. `window` is the window
+    a stable wait watches (the whole display without)."""
     kind, _, arg = spec.partition(":")
     if kind == "window":
         return f"a window named {arg!r}", lambda: x.find_window(env, arg)
@@ -89,8 +91,12 @@ def waiter(spec, env, scratch, proc):
         return f"{arg} to exist", lambda: Path(arg).exists()
     if kind == "ready":
         return "the program to say it's ready", lambda: (scratch / "ready").exists()
+    if kind == "stable":
+        quiet = float(arg) if arg else 0.5
+        where = f"the window {window!r}" if window else "the display"
+        return f"{where} to hold still for {quiet:g}s", x.Still(env, window, quiet)
     raise SystemExit(f"shotbox: don't know how to wait for {spec!r} "
-                     "(window:RE, port:N, file:PATH or ready)")
+                     "(window:RE, port:N, file:PATH, ready or stable[:SECS])")
 
 
 def tail(path, n=30):
@@ -112,18 +118,24 @@ def cmd_shoot(argv):
                         "instead of the whole display; also waits for it")
     p.add_argument("--crop", metavar="WxH+X+Y", help="then crop to this")
     p.add_argument("--wait", action="append", default=[], metavar="WHAT",
-                   help="wait for window:RE, port:N, file:PATH, or ready (the "
+                   help="wait for window:RE, port:N, file:PATH, ready (the "
                         "program touched $SHOTBOX_SCRATCH/ready, as `shotbox "
-                        "term` does after its steps); repeatable")
+                        "term` does after its steps), or stable[:SECS] (the "
+                        "--window, or the display, unchanged for SECS, 0.5); "
+                        "repeatable, in order")
     p.add_argument("--settle", type=float, default=0.3, metavar="SECS",
                    help="then wait this long for the last paint (0.3)")
     p.add_argument("--timeout", type=float, default=30, metavar="SECS",
                    help="give up on a wait after this long (30)")
     p.add_argument("--log", metavar="FILE", help="keep the command's output here")
+    p.add_argument("--failed", metavar="FILE",
+                   help="if it fails, a picture of the screen goes here "
+                        "(OUT's name with -failed, beside it)")
     session_options(p)
     opts, cmd = split(argv)
     a = p.parse_args(opts)
     cmd = command(cmd, p)
+    failed = a.failed or str(Path(a.out).with_name(Path(a.out).stem + "-failed.png"))
     waits = list(a.wait)
     if a.window and not any(w.startswith("window:") for w in waits):
         waits.insert(0, "window:" + a.window)
@@ -135,7 +147,7 @@ def cmd_shoot(argv):
         proc = s.spawn(cmd, log=log)
         try:
             for spec in waits:
-                what, test = waiter(spec, s.env, s.scratch, proc)
+                what, test = waiter(spec, s.env, s.scratch, proc, window=a.window)
                 wait_for(what, test, a.timeout, alive=proc)
             time.sleep(a.settle)
             if proc.poll() is not None:
@@ -146,7 +158,10 @@ def cmd_shoot(argv):
                 raise SessionError(f"the window {a.window!r} went away")
             x.capture(s.env, a.out, window=window, crop=a.crop)
         except SessionError as e:
-            sys.stderr.write(f"shotbox: {e}\n--- {' '.join(cmd)} said ---\n{tail(log)}\n")
+            sys.stderr.write(f"shotbox: {e}\n")
+            if x.try_capture(s.env, failed):
+                sys.stderr.write(f"shotbox: the screen then: {failed}\n")
+            sys.stderr.write(f"--- {' '.join(cmd)} said ---\n{tail(log)}\n")
             return 1
     print(a.out)
     return 0
@@ -161,17 +176,27 @@ def inside():
 def cmd_wait(argv):
     p = argparse.ArgumentParser(prog="shotbox wait",
                                 description="Inside `shotbox run`: wait for a window, "
-                                            "a port, a file, or the ready file.")
-    p.add_argument("kind", choices=("window", "port", "file", "ready"))
-    p.add_argument("arg", nargs="?", default="")
+                                            "a port, a file, the ready file, or the "
+                                            "screen to stop changing.")
+    p.add_argument("kind", choices=("window", "port", "file", "ready", "stable"))
+    p.add_argument("arg", nargs="?", default="",
+                   help="the window's name (a regex), the port, the file; for "
+                        "stable, how long it must hold still (0.5)")
+    p.add_argument("--window", metavar="RE",
+                   help="for stable: watch this window rather than the display")
     p.add_argument("--timeout", type=float, default=30)
+    p.add_argument("--failed", metavar="FILE", default=os.environ.get("SHOTBOX_FAILED"),
+                   help="if it gives up, a picture of the screen goes here "
+                        "($SHOTBOX_FAILED)")
     a = p.parse_args(argv)
     env, scratch = inside()
-    what, test = waiter(f"{a.kind}:{a.arg}", env, scratch, None)
+    what, test = waiter(f"{a.kind}:{a.arg}", env, scratch, None, window=a.window)
     try:
         wait_for(what, test, a.timeout)
     except SessionError as e:
         sys.stderr.write(f"shotbox: {e}\n")
+        if a.failed and x.try_capture(env, a.failed):
+            sys.stderr.write(f"shotbox: the screen then: {a.failed}\n")
         return 1
     return 0
 
