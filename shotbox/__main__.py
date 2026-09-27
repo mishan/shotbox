@@ -10,6 +10,7 @@
     shotbox click X Y [--window RE]                 (inside a session) click there
     shotbox move X Y [--window RE]                  (inside a session) point there
     shotbox drag X1 Y1 X2 Y2 [--window RE]          (inside a session) drag
+    shotbox park                                    (inside a session) pointer out of the way
     shotbox compare A.png B.png [--diff D.png]      how many pixels differ
 
 `shotbox COMMAND --help` for each one's options.
@@ -22,7 +23,8 @@ import time
 from pathlib import Path
 
 from . import term, x, xtest
-from .session import Session, SessionError, wait_for
+from .screen import Screen, SessionError
+from .session import Session
 
 
 def size(s):
@@ -79,26 +81,6 @@ def cmd_run(argv):
         return s.run(cmd)
 
 
-def waiter(spec, env, scratch, proc, window=None):
-    """What to say, and the test to poll, for a wait. `window` is the window
-    a stable wait watches (the whole display without)."""
-    kind, _, arg = spec.partition(":")
-    if kind == "window":
-        return f"a window named {arg!r}", lambda: x.find_window(env, arg)
-    if kind == "port":
-        return f"port {arg}", lambda: x.port_open(int(arg))
-    if kind == "file":
-        return f"{arg} to exist", lambda: Path(arg).exists()
-    if kind == "ready":
-        return "the program to say it's ready", lambda: (scratch / "ready").exists()
-    if kind == "stable":
-        quiet = float(arg) if arg else 0.5
-        where = f"the window {window!r}" if window else "the display"
-        return f"{where} to hold still for {quiet:g}s", x.Still(env, window, quiet)
-    raise SystemExit(f"shotbox: don't know how to wait for {spec!r} "
-                     "(window:RE, port:N, file:PATH, ready or stable[:SECS])")
-
-
 def tail(path, n=30):
     try:
         lines = Path(path).read_text(errors="replace").splitlines()
@@ -125,6 +107,8 @@ def cmd_shoot(argv):
                         "repeatable, in order")
     p.add_argument("--settle", type=float, default=0.3, metavar="SECS",
                    help="then wait this long for the last paint (0.3)")
+    p.add_argument("--park", action="store_true",
+                   help="move the pointer out of the way before the picture")
     p.add_argument("--timeout", type=float, default=30, metavar="SECS",
                    help="give up on a wait after this long (30)")
     p.add_argument("--log", metavar="FILE", help="keep the command's output here")
@@ -135,7 +119,6 @@ def cmd_shoot(argv):
     opts, cmd = split(argv)
     a = p.parse_args(opts)
     cmd = command(cmd, p)
-    failed = a.failed or str(Path(a.out).with_name(Path(a.out).stem + "-failed.png"))
     waits = list(a.wait)
     if a.window and not any(w.startswith("window:") for w in waits):
         waits.insert(0, "window:" + a.window)
@@ -143,34 +126,32 @@ def cmd_shoot(argv):
         p.error("nothing to wait for: give --window, --wait or --settle")
 
     with make_session(a) as s:
+        s.failed = a.failed or str(Path(a.out).with_name(Path(a.out).stem + "-failed.png"))
         log = a.log or str(s.scratch / "command.log")
         proc = s.spawn(cmd, log=log)
         try:
             for spec in waits:
-                what, test = waiter(spec, s.env, s.scratch, proc, window=a.window)
-                wait_for(what, test, a.timeout, alive=proc)
+                kind, _, arg = spec.partition(":")
+                s.until(*s.test(kind, arg, window=a.window), a.timeout, alive=proc)
             time.sleep(a.settle)
             if proc.poll() is not None:
-                raise SessionError(f"the program exited (status {proc.returncode}) "
-                                   "before the picture was taken")
-            window = x.find_window(s.env, a.window) if a.window else None
-            if a.window and not window:
-                raise SessionError(f"the window {a.window!r} went away")
-            x.capture(s.env, a.out, window=window, crop=a.crop)
+                s.fail(f"the program exited (status {proc.returncode}) "
+                       "before the picture was taken")
+            if a.window and not x.find_window(s.env, a.window):
+                s.fail(f"the window {a.window!r} went away")
+            s.capture(a.out, window=a.window, crop=a.crop, park=a.park)
         except SessionError as e:
-            sys.stderr.write(f"shotbox: {e}\n")
-            if x.try_capture(s.env, failed):
-                sys.stderr.write(f"shotbox: the screen then: {failed}\n")
-            sys.stderr.write(f"--- {' '.join(cmd)} said ---\n{tail(log)}\n")
+            sys.stderr.write(f"shotbox: {e}\n--- {' '.join(cmd)} said ---\n{tail(log)}\n")
             return 1
     print(a.out)
     return 0
 
 
 def inside():
+    """The display of the session this runs in."""
     if not os.environ.get("SHOTBOX_SCRATCH"):
         raise SystemExit("shotbox: this only works inside `shotbox run`")
-    return os.environ, Path(os.environ["SHOTBOX_SCRATCH"])
+    return Screen()
 
 
 def cmd_wait(argv):
@@ -185,19 +166,13 @@ def cmd_wait(argv):
     p.add_argument("--window", metavar="RE",
                    help="for stable: watch this window rather than the display")
     p.add_argument("--timeout", type=float, default=30)
-    p.add_argument("--failed", metavar="FILE", default=os.environ.get("SHOTBOX_FAILED"),
+    p.add_argument("--failed", metavar="FILE",
                    help="if it gives up, a picture of the screen goes here "
                         "($SHOTBOX_FAILED)")
     a = p.parse_args(argv)
-    env, scratch = inside()
-    what, test = waiter(f"{a.kind}:{a.arg}", env, scratch, None, window=a.window)
-    try:
-        wait_for(what, test, a.timeout)
-    except SessionError as e:
-        sys.stderr.write(f"shotbox: {e}\n")
-        if a.failed and x.try_capture(env, a.failed):
-            sys.stderr.write(f"shotbox: the screen then: {a.failed}\n")
-        return 1
+    screen = inside()
+    screen.failed = a.failed or screen.failed
+    screen.until(*screen.test(a.kind, a.arg, window=a.window), a.timeout)
     return 0
 
 
@@ -208,13 +183,10 @@ def cmd_capture(argv):
     p.add_argument("out")
     p.add_argument("--window", metavar="RE")
     p.add_argument("--crop", metavar="WxH+X+Y")
+    p.add_argument("--park", action="store_true",
+                   help="move the pointer out of the way first, as `shotbox park`")
     a = p.parse_args(argv)
-    env, _ = inside()
-    window = x.find_window(env, a.window) if a.window else None
-    if a.window and not window:
-        sys.stderr.write(f"shotbox: no window named {a.window!r}\n")
-        return 1
-    x.capture(env, a.out, window=window, crop=a.crop)
+    inside().capture(a.out, window=a.window, crop=a.crop, park=a.park)
     return 0
 
 
@@ -225,10 +197,7 @@ def cmd_key(argv):
                                             "alt+shift+Tab.")
     p.add_argument("chords", nargs="+", metavar="CHORD")
     a = p.parse_args(argv)
-    env, _ = inside()
-    with xtest.Display(env) as d:
-        for c in a.chords:
-            d.chord(c)
+    inside().key(*a.chords)
     return 0
 
 
@@ -238,20 +207,8 @@ def cmd_type(argv):
                                             "has the keyboard focus.")
     p.add_argument("text")
     a = p.parse_args(argv)
-    env, _ = inside()
-    with xtest.Display(env) as d:
-        d.type(a.text)
+    inside().type(a.text)
     return 0
-
-
-def where(a, env):
-    """The point to act on: X, Y on the screen, or inside --window."""
-    if not a.window:
-        return a.x, a.y
-    w = x.find_window(env, a.window)
-    if not w:
-        raise SessionError(f"no window named {a.window!r}")
-    return w[4] + a.x, w[5] + a.y
 
 
 def pointer_command(name, what):
@@ -266,13 +223,10 @@ def pointer_command(name, what):
             p.add_argument("--button", type=int, default=1, help="1 left, 2 middle, 3 right")
             p.add_argument("--double", action="store_true", help="click twice")
         a = p.parse_args(argv)
-        env, _ = inside()
-        px, py = where(a, env)
-        with xtest.Display(env) as d:
-            if name == "click":
-                d.click(px, py, button=a.button, count=2 if a.double else 1)
-            else:
-                d.move(px, py)
+        if name == "click":
+            inside().click(a.x, a.y, window=a.window, button=a.button, double=a.double)
+        else:
+            inside().move(a.x, a.y, window=a.window)
         return 0
     return cmd
 
@@ -287,15 +241,20 @@ def cmd_drag(argv):
                    help="the points are inside this window rather than the screen")
     p.add_argument("--button", type=int, default=1)
     a = p.parse_args(argv)
-    env, _ = inside()
-    dx = dy = 0
-    if a.window:
-        w = x.find_window(env, a.window)
-        if not w:
-            raise SessionError(f"no window named {a.window!r}")
-        dx, dy = w[4], w[5]
-    with xtest.Display(env) as d:
-        d.drag(a.x1 + dx, a.y1 + dy, a.x2 + dx, a.y2 + dy, button=a.button)
+    inside().drag(a.x1, a.y1, a.x2, a.y2, window=a.window, button=a.button)
+    return 0
+
+
+def cmd_park(argv):
+    p = argparse.ArgumentParser(prog="shotbox park",
+                                description="Inside `shotbox run`: move the pointer to the "
+                                            "screen's bottom-right corner, off whatever it "
+                                            "was hovering, and wait (up to --settle) for "
+                                            "the repaint.")
+    p.add_argument("--settle", type=float, default=2.0, metavar="SECS",
+                   help="wait at most this long for the display to hold still (2)")
+    a = p.parse_args(argv)
+    inside().park(settle=a.settle)
     return 0
 
 
@@ -322,7 +281,7 @@ COMMANDS = {"run": cmd_run, "shoot": cmd_shoot, "term": term.main, "wait": cmd_w
             "capture": cmd_capture, "compare": cmd_compare, "key": cmd_key,
             "type": cmd_type, "click": pointer_command("click", "move the pointer and click"),
             "move": pointer_command("move", "move the pointer, for a hover"),
-            "drag": cmd_drag}
+            "drag": cmd_drag, "park": cmd_park}
 
 
 def main(argv=None):

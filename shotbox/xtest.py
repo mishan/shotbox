@@ -75,6 +75,8 @@ class Display:
         self.min_keycode, self.max_keycode = more[26], more[27]
         at = 32 + vendor_len + _pad(vendor_len) + 8 * formats
         self.root, = struct.unpack_from("<I", more, at) if screens else (0,)
+        # The root's size: after it, a colormap, two pixels and an event mask.
+        self.width, self.height = struct.unpack_from("<HH", more, at + 20) if screens else (0, 0)
         self.xtest = self._extension(b"XTEST")
         self.keymap = self._keymap()
 

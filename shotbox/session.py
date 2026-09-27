@@ -8,7 +8,12 @@ that is removed afterwards. Settings are in-memory and portals are off, so
 apps come up with their own defaults instead of yours.
 
     with Session(size=(1280, 800)) as s:
-        s.run(["gnome-text-editor"])
+        s.spawn(["gnome-text-editor"])
+        s.wait_window("Text Editor")
+        s.capture("editor.png", window="Text Editor")
+
+A Session is a Screen (screen.py) once it's entered, so it waits, drives
+the display and takes pictures.
 
 The pieces, and why each one:
 
@@ -29,8 +34,9 @@ import shutil
 import signal
 import subprocess
 import tempfile
-import time
 from pathlib import Path
+
+from .screen import Screen, SessionError, wait_for  # noqa: F401 (wait_for, for callers)
 
 # Passed through from the caller unless told otherwise. Everything else is
 # rebuilt: nothing from your session leaks in by accident.
@@ -74,10 +80,6 @@ gtk-enable-animations = false
 """
 
 
-class SessionError(RuntimeError):
-    pass
-
-
 def need(*tools):
     missing = [t for t in tools if not shutil.which(t)]
     if missing:
@@ -113,9 +115,12 @@ def kill_group(proc, grace=2.0):
         proc.wait()
 
 
-class Session:
+class Session(Screen):
+    """A sealed session, and its display: everything a Screen does works on
+    it once it's entered. `failed`, as for a Screen."""
+
     def __init__(self, size=(1280, 800), desktop=False, system_bus=False,
-                 seed=None, keep=False, env=None, passthrough=()):
+                 seed=None, keep=False, env=None, passthrough=(), failed=None):
         self.size = size
         self.desktop = desktop
         self.system_bus = system_bus
@@ -125,6 +130,8 @@ class Session:
         self.passthrough = tuple(PASS) + tuple(passthrough)
         self.scratch = None
         self.env = None
+        self.failed = failed
+        self._x = None
         self._procs = []
 
     # --- setup ----------------------------------------------------------------
@@ -260,6 +267,7 @@ class Session:
     # --- teardown -----------------------------------------------------------------
 
     def __exit__(self, *exc):
+        self.close()
         for proc in reversed(self._procs):
             kill_group(proc)
         if self.scratch and self.scratch.exists():
@@ -268,18 +276,3 @@ class Session:
             else:
                 shutil.rmtree(self.scratch, ignore_errors=True)
         return False
-
-
-def wait_for(what, test, timeout, interval=0.1, alive=None):
-    """Poll `test()` until it returns something true, or fail saying what."""
-    end = time.monotonic() + timeout
-    while True:
-        got = test()
-        if got:
-            return got
-        if alive is not None and alive.poll() is not None:
-            raise SessionError(f"gave up waiting for {what}: the program exited "
-                               f"(status {alive.returncode})")
-        if time.monotonic() > end:
-            raise SessionError(f"gave up waiting for {what} after {timeout:g}s")
-        time.sleep(interval)
