@@ -193,8 +193,10 @@ import { serve, checks, pageErrors, launch, until, gif } from 'shotbox';
   many seconds off the start, `colors` caps the palette, and `dither` is
   ffmpeg's (`none` for flat pages with something moving on them).
 
-Use it from a checkout: `"shotbox": "file:../shotbox/node"` in
-`devDependencies`.
+Its `package.json` is at the top of the repository, since npm installs
+from the top of a git repository and nowhere else:
+`"shotbox": "github:mishan/shotbox"` in `devDependencies`, or
+`"file:../shotbox"` for a checkout beside yours.
 
 ## Tests
 
