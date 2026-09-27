@@ -58,6 +58,7 @@ sealed session, waits, takes the picture and stops everything.
   `shotbox term` writes it. `stable` is the `--window` (or the whole display)
   looking the same for SECS (0.5): for a program with no other sign it's
   done drawing.
+- `--park` moves the pointer out of the way first (see `shotbox park`).
 - `--crop WxH+X+Y`, `--settle SECS` (0.3), `--timeout SECS` (30),
   `--log FILE` for the program's output. If a wait fails or the program
   dies, it says which, shows the program's last output, and leaves a
@@ -67,7 +68,7 @@ sealed session, waits, takes the picture and stops everything.
 **`shotbox run [options] -- COMMAND...`** runs a command in a sealed session
 and exits with its status. For scripts that take several pictures: inside,
 `shotbox wait window|port|file|ready|stable ARG` and `shotbox capture OUT.png
-[--window RE] [--crop G]` work on the session's display. `shotbox wait
+[--window RE] [--crop G] [--park]` work on the session's display. `shotbox wait
 stable [SECS] [--window RE]` is the one to use after a click, in place of a
 sleep. A wait that gives up takes a picture of the screen with `--failed
 FILE`, or wherever `$SHOTBOX_FAILED` says (`--env SHOTBOX_FAILED=...`).
@@ -76,8 +77,11 @@ Inside, `shotbox key CHORD...` presses keys (`ctrl+comma`, `Return`,
 `alt+shift+Tab`), `shotbox type TEXT` types ASCII text, and `shotbox click
 X Y`, `shotbox move X Y` and `shotbox drag X1 Y1 X2 Y2` work the pointer,
 at a point on the screen or, with `--window RE`, inside a window (`click
---button 3`, `--double`). They
-speak XTEST to the display directly, so there's still nothing to install.
+--button 3`, `--double`). `shotbox park` moves the pointer to the screen's
+bottom-right corner, off whatever it was hovering, and waits (up to
+`--settle`, 2s) for the repaint; a screen that keeps changing is taken as it
+is. They speak XTEST to the display directly, so there's still nothing to
+install.
 
 Both take the session options: `--screen WxH` (1280x800); `--env NAME=VALUE`
 and `--pass NAME` to set or let through variables; `--seed DIR` to start the
@@ -110,6 +114,43 @@ shotbox shoot irssi.png --window shotbox-term --wait ready -- \
 counts the pixels that differ and fails if more than `--max` (0) do. With a
 committed picture, that's a visual regression test.
 
+## Python
+
+A script that takes many pictures can drive the display itself rather than
+start a `shotbox` process for every click. Inside `shotbox run`,
+`shotbox.here()` is the session's display; outside, `shotbox.Session` starts
+one. Both are a `Screen`:
+
+```python
+import shotbox
+
+with shotbox.Session(size=(1600, 1000), failed="out/chat-failed.png") as s:
+    s.spawn(["gtkhx"], log="gtkhx.log")
+    s.wait_window("GtkHx.*")
+    s.click(560, 660, window="GtkHx.*")
+    s.type("/clear\n")
+    s.wait_stable(window="GtkHx.*")
+    s.capture("out/chat.png", window="GtkHx.*", park=True)
+```
+
+- Waits: `wait_window(re)` (returns `(id, name, w, h, x, y)`),
+  `wait_port(n)`, `wait_file(path)`, `wait_ready()`,
+  `wait_stable(secs=0.5, window=None)`, and `until(what, test)` for a test
+  of your own; each takes `timeout` (30).
+- Input: `key(*chords)`, `type(text)`, `click(x, y, window=None,
+  button=1, double=False)`, `move`, `drag`, `park()`. One X connection,
+  kept.
+- Pictures: `capture(out, window=None, crop=None, park=False)`, and
+  `window(re)` for where one is.
+- Anything that fails raises `SessionError`, saying what; with `failed` set
+  (or `$SHOTBOX_FAILED` inside `shotbox run`) it leaves a picture of the
+  screen there first, and says where.
+- A `Session` also has `spawn(cmd, log=None)`, `run(cmd)`, `env` and
+  `scratch`.
+
+With a checkout, put its root on `PYTHONPATH` (`--pass PYTHONPATH` to let it
+into a session).
+
 ## Node
 
 `node/` is a small package for browser checks with Playwright, from the
@@ -135,8 +176,9 @@ Use it from a checkout: `"shotbox": "file:../shotbox/node"` in
 
 ## Tests
 
-`test/run.sh` checks the session, the terminal, the pictures and the Node
-helpers, and takes a few seconds.
+`test/run.sh` checks the session, the terminal, the pictures, the Python
+API (`test/api.py`, which needs GTK 3's PyGObject) and the Node helpers, and
+takes a few seconds.
 
 ## License
 
