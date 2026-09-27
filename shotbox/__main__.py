@@ -12,6 +12,7 @@
     shotbox drag X1 Y1 X2 Y2 [--window RE]          (inside a session) drag
     shotbox park                                    (inside a session) pointer out of the way
     shotbox compare A.png B.png [--diff D.png]      how many pixels differ
+    shotbox compare REFDIR NEWDIR [NAME...]         the same, picture by picture
 
 `shotbox COMMAND --help` for each one's options.
 """
@@ -53,6 +54,13 @@ def make_session(a):
     env = dict(e.split("=", 1) for e in a.env)
     return Session(size=a.screen, desktop=a.desktop, system_bus=a.system_bus,
                    seed=a.seed, keep=a.keep, env=env, passthrough=a.passthrough)
+
+
+def self_command():
+    """How to run this shotbox again, from inside a session: this checkout's
+    bin/shotbox, or else whichever is on PATH."""
+    here = Path(__file__).resolve().parent.parent / "bin" / "shotbox"
+    return [sys.executable, str(here)] if here.exists() else ["shotbox"]
 
 
 def split(argv):
@@ -98,7 +106,10 @@ def cmd_shoot(argv):
     p.add_argument("--window", metavar="RE",
                    help="take this window (its name, a regex matched in full) "
                         "instead of the whole display; also waits for it")
-    p.add_argument("--crop", metavar="WxH+X+Y", help="then crop to this")
+    p.add_argument("--crop", metavar="WxH+X+Y",
+                   help="then crop to this; without it, to what the program "
+                        "wrote to $SHOTBOX_SCRATCH/crop, if it did (as "
+                        "`shotbox term --crop` does)")
     p.add_argument("--wait", action="append", default=[], metavar="WHAT",
                    help="wait for window:RE, port:N, file:PATH, ready (the "
                         "program touched $SHOTBOX_SCRATCH/ready, as `shotbox "
@@ -139,7 +150,10 @@ def cmd_shoot(argv):
                        "before the picture was taken")
             if a.window and not x.find_window(s.env, a.window):
                 s.fail(f"the window {a.window!r} went away")
-            s.capture(a.out, window=a.window, crop=a.crop, park=a.park)
+            crop = a.crop
+            if not crop and (s.scratch / "crop").exists():
+                crop = (s.scratch / "crop").read_text().strip()
+            s.capture(a.out, window=a.window, crop=crop, park=a.park)
         except SessionError as e:
             sys.stderr.write(f"shotbox: {e}\n--- {' '.join(cmd)} said ---\n{tail(log)}\n")
             return 1
@@ -258,23 +272,87 @@ def cmd_park(argv):
     return 0
 
 
+def per_name(values, name, default):
+    """--fuzz and --max: the last NAME=VALUE for this picture, else the last
+    plain VALUE, else the default."""
+    named = [v.split("=", 1)[1] for v in values if v.split("=", 1)[0] == name and "=" in v]
+    plain = [v for v in values if "=" not in v]
+    return (named or plain or [default])[-1]
+
+
 def cmd_compare(argv):
     p = argparse.ArgumentParser(prog="shotbox compare",
                                 description="Count the pixels that differ between two "
-                                            "images; fail if more than --max do.")
-    p.add_argument("a")
-    p.add_argument("b")
-    p.add_argument("--diff", metavar="OUT.png", help="write the differences, marked in red")
-    p.add_argument("--fuzz", default="0%", help="colors this close count as the same (0%%)")
-    p.add_argument("--max", type=int, default=0, help="pixels allowed to differ (0)")
+                                            "images; fail if more than --max do. Given "
+                                            "two directories, compare each picture in "
+                                            "the first (or each NAME) with the one of "
+                                            "the same name in the second.")
+    p.add_argument("a", help="an image, or a directory of the pictures as they should be")
+    p.add_argument("b", help="an image, or a directory of fresh pictures")
+    p.add_argument("names", nargs="*", metavar="NAME",
+                   help="with directories: just these (NAME or NAME.png)")
+    p.add_argument("--diff", metavar="OUT",
+                   help="write the differences, marked in red; with directories, "
+                        "OUT is a directory, and each picture that fails gets NAME-diff.png")
+    p.add_argument("--fuzz", action="append", default=[], metavar="[NAME=]PCT",
+                   help="colors this close count as the same (0%%); NAME=PCT for one "
+                        "picture (repeatable)")
+    p.add_argument("--max", action="append", default=[], metavar="[NAME=]N",
+                   help="pixels allowed to differ (0); NAME=N for one picture (repeatable)")
     a = p.parse_args(argv)
-    try:
-        n = x.compare(a.a, a.b, diff=a.diff, fuzz=a.fuzz)
-    except ValueError as e:
-        sys.stderr.write(f"shotbox: {e}\n")
+    def fuzz(name):
+        return per_name(a.fuzz, name, "0%")
+
+    def most(name):
+        return int(per_name(a.max, name, 0))
+
+    dirs = Path(a.a).is_dir(), Path(a.b).is_dir()
+    if dirs[0] != dirs[1]:
+        p.error("compare two images, or two directories")
+    if not dirs[0]:
+        if a.names:
+            p.error("NAMEs go with two directories")
+        try:
+            n = x.compare(a.a, a.b, diff=a.diff, fuzz=fuzz(None))
+        except ValueError as e:
+            sys.stderr.write(f"shotbox: {e}\n")
+            return 2
+        print(f"{n} pixels differ")
+        return 0 if n <= most(None) else 1
+
+    names = [n.removesuffix(".png") for n in a.names] or sorted(
+        f.stem for f in Path(a.a).glob("*.png"))
+    if not names:
+        sys.stderr.write(f"shotbox: no pictures in {a.a}\n")
         return 2
-    print(f"{n} pixels differ")
-    return 0 if n <= a.max else 1
+    if a.diff:
+        Path(a.diff).mkdir(parents=True, exist_ok=True)
+    bad = []
+    for name in names:
+        ref, new = Path(a.a) / f"{name}.png", Path(a.b) / f"{name}.png"
+        missing = [str(f) for f in (ref, new) if not f.exists()]
+        if missing:
+            print(f"{name}: no {' or '.join(missing)}")
+            bad.append(name)
+            continue
+        diff = Path(a.diff) / f"{name}-diff.png" if a.diff else None
+        try:
+            n = x.compare(ref, new, fuzz=fuzz(name))
+        except ValueError as e:
+            print(f"{name}: {e}")
+            bad.append(name)
+            continue
+        if n > most(name):
+            if diff:
+                x.compare(ref, new, diff=diff, fuzz=fuzz(name))
+            print(f"{name}: {n} pixels differ" + (f"; see {diff}" if diff else ""))
+            bad.append(name)
+        else:
+            print(f"{name}: {'the same' if n == 0 else f'{n} pixels differ, allowed'}")
+    if bad:
+        print(f"differ: {', '.join(bad)}")
+        return 1
+    return 0
 
 
 COMMANDS = {"run": cmd_run, "shoot": cmd_shoot, "term": term.main, "wait": cmd_wait,

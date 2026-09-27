@@ -99,20 +99,40 @@ named `shotbox-term`.
 - `--size COLSxROWS`, `--font "Monospace 11"`, `--title NAME`.
 - Steps, in order: `--when REGEX` waits for the screen's text to match,
   `--type TEXT` types (`\r` is Enter, `\e` Escape), `--sleep SECS`. After
-  the last one it writes the ready file.
+  the last one it writes the ready file. The terminal stays open, its
+  screen as the program left it, after the program exits: no `sleep 60` to
+  keep it up.
+- `--crop COLSxROWS` takes only the top-left cells: a wide terminal, so
+  nothing wraps, and a picture of just the part that matters. It writes
+  the size in pixels to `$SHOTBOX_SCRATCH/crop`, which `shoot` crops to
+  when it has no `--crop` of its own.
+- `--shoot OUT.png` starts the session and takes the picture too, taking
+  `shoot`'s session options, `--park` and `--failed`.
 - `--log FILE` keeps every byte the program wrote, escape codes and all
   (via `script`, whose first line is its own header). Colors are hard to
   judge in a picture and easy to grep in the log.
 
 ```
-shotbox shoot irssi.png --window shotbox-term --wait ready -- \
-  shotbox term --scheme dark.json --size 88x24 \
-    --when 'End of /NAMES' --type 'hello\r' -- irssi -c 127.0.0.1
+shotbox term --shoot irssi.png --scheme dark.json --size 88x24 \
+  --when 'End of /NAMES' --type 'hello\r' -- irssi -c 127.0.0.1
 ```
+
+which is short for `shotbox shoot irssi.png --window shotbox-term --wait
+ready -- shotbox term ...`.
 
 **`shotbox compare A.png B.png [--diff D.png] [--fuzz 1%] [--max N]`**
 counts the pixels that differ and fails if more than `--max` (0) do. With a
 committed picture, that's a visual regression test.
+
+**`shotbox compare REFDIR NEWDIR [NAME...]`** does that for each picture in
+REFDIR (or each NAME), against the one of the same name in NEWDIR, a line
+each, and fails if any differs, is missing, or changed size. `--diff DIR`
+writes `NAME-diff.png` there for each that fails. `--fuzz` and `--max`
+take `NAME=VALUE` for one picture, beside a plain VALUE for the rest:
+
+```
+shotbox compare data/screenshots fresh --fuzz 0.5% --fuzz video=5% --diff fresh
+```
 
 ## Python
 
