@@ -4,9 +4,11 @@ Uses the X tools every distro has (xwininfo, ImageMagick's import and
 convert) rather than a Python X binding, so there's nothing to install.
 """
 
+import hashlib
 import re
 import socket
 import subprocess
+import time
 from pathlib import Path
 
 TREE_LINE = re.compile(r'^\s*(0x[0-9a-f]+) "(.*)":.*?(\d+)x(\d+)\+-?\d+\+-?\d+\s+\+(-?\d+)\+(-?\d+)\s*$')
@@ -61,6 +63,52 @@ def capture(env, out, window=None, crop=None):
     cmd += QUIET_PNG + [str(out)]
     subprocess.run(cmd, env=env, check=True)
     return Path(out)
+
+
+def try_capture(env, out):
+    """Screenshot the whole display for a look at what went wrong: the path,
+    or None if there was no display left to take."""
+    try:
+        return capture(env, out)
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
+def fingerprint(env, window=None):
+    """A digest of what's on the display, or in one window, or None if it
+    couldn't be taken (a window gone between finding it and taking it)."""
+    target = window[0] if window else "root"
+    r = subprocess.run(["import", "-window", target, "-depth", "8", "rgb:-"],
+                       env=env, capture_output=True)
+    if r.returncode or not r.stdout:
+        return None
+    return hashlib.sha256(r.stdout).digest()
+
+
+class Still:
+    """A test for wait_for: true once the display (or the window named
+    `name`) has looked the same for `quiet` seconds. For the paint after a
+    click, a panel sliding in, a toast going away: anything that has no
+    other sign it's done."""
+
+    def __init__(self, env, name=None, quiet=0.5):
+        self.env, self.name, self.quiet = env, name, quiet
+        self.last, self.since = None, 0.0
+
+    def __call__(self):
+        window = None
+        if self.name:
+            window = find_window(self.env, self.name)
+            if not window:
+                self.last = None
+                return False
+        # The window's place and size too: one that moves hasn't settled.
+        now = (window[2:] if window else None, fingerprint(self.env, window))
+        t = time.monotonic()
+        if now[1] is None or now != self.last:
+            self.last, self.since = now, t
+            return False
+        return t - self.since >= self.quiet
 
 
 def montage(images, out, across=True):
