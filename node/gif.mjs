@@ -11,6 +11,14 @@
  *
  * Through a palette of its own: the default 216 colors turn a page of
  * flat grays into bands. Needs ffmpeg.
+ *
+ * `from' skips that many seconds of the start: a recording begins with
+ * the page, and a blank page and a load are rarely what the loop is of.
+ * `colors' caps the palette and `dither' is ffmpeg's paletteuse dither
+ * (`none', `bayer:bayer_scale=3', `sierra2_4a'): a page of flat grays
+ * with something animating on it can want few colors and no dither, since
+ * a dither pattern over a moving region is noise the gif pays for every
+ * frame.
  */
 
 import { spawn } from 'node:child_process';
@@ -32,18 +40,22 @@ function run (cmd, args)
     });
 }
 
-export async function gif (film, out, { width = 1280, fps = 12 } = {})
+export async function gif (film, out, { width = 1280, fps = 12, from = 0,
+                                        colors = 256,
+                                        dither = 'bayer:bayer_scale=3' } = {})
 {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'shotbox-gif-'));
     const palette = path.join(dir, 'palette.png');
     const filters = `fps=${fps},scale=${width}:-1:flags=lanczos`;
+    const input = ['-ss', String(from), '-i', film];
 
     try
     {
-        await run('ffmpeg', ['-y', '-i', film, '-vf',
-                             `${filters},palettegen=stats_mode=diff`, palette]);
-        await run('ffmpeg', ['-y', '-i', film, '-i', palette, '-lavfi',
-                             `${filters} [x]; [x][1:v] paletteuse=dither=bayer:bayer_scale=3:diff_mode=rectangle`,
+        await run('ffmpeg', ['-y', ...input, '-vf',
+                             `${filters},palettegen=stats_mode=diff:max_colors=${colors}`,
+                             palette]);
+        await run('ffmpeg', ['-y', ...input, '-i', palette, '-lavfi',
+                             `${filters} [x]; [x][1:v] paletteuse=dither=${dither}:diff_mode=rectangle`,
                              out]);
     }
     finally

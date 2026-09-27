@@ -188,8 +188,10 @@ import { serve, checks, pageErrors, launch, until, gif } from 'shotbox';
 - `launch(cmd, args)`: a program in its own process group, with `kill()`
   that reaches its children and `why()` that says how it ended and what it
   printed. `until(test, ms)` polls.
-- `gif(webm, out)`: a Playwright recording as a GIF, via ffmpeg, with its
-  own palette.
+- `gif(webm, out, { width, fps, from, colors, dither })`: a Playwright
+  recording as a GIF, via ffmpeg, with its own palette. `from` cuts that
+  many seconds off the start, `colors` caps the palette, and `dither` is
+  ffmpeg's (`none` for flat pages with something moving on them).
 
 Use it from a checkout: `"shotbox": "file:../shotbox/node"` in
 `devDependencies`.
