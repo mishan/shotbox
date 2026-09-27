@@ -312,6 +312,10 @@ def cmd_compare(argv):
     if not dirs[0]:
         if a.names:
             p.error("NAMEs go with two directories")
+        missing = [f for f in (a.a, a.b) if not Path(f).exists()]
+        if missing:
+            sys.stderr.write(f"shotbox: no {' or '.join(missing)}\n")
+            return 2
         try:
             n = x.compare(a.a, a.b, diff=a.diff, fuzz=fuzz(None))
         except ValueError as e:

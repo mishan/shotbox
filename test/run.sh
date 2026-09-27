@@ -120,6 +120,9 @@ set +e; out=$("$sb" compare "$tmp/ref" "$tmp/new" --diff "$tmp/diffs"); st=$?; s
   && ok "compare: directories, picture by picture" || fail "compare dirs: $st $out"
 "$sb" compare "$tmp/ref" "$tmp/new" same off --max 0 --max off=1 >/dev/null \
   && ok "compare: NAMEs, and --max for one" || fail "compare NAME=N"
+set +e; "$sb" compare "$tmp/a.png" "$tmp/nope.png" 2> "$tmp/err"; st=$?; set -e
+[ $st = 2 ] && grep -q "no .*nope.png" "$tmp/err" && ok "compare: a missing picture, said plainly" \
+  || fail "compare missing: $st $(cat "$tmp/err")"
 
 # Node.
 node --test "$here"/node.test.mjs >"$tmp/node.log" 2>&1 && ok "node helpers" \
