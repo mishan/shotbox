@@ -4,13 +4,15 @@
   "description": "Helpers for reproducible browser screenshots and checks: a static server, a check reporter, page errors, process-group launch, webm to GIF",
   "type": "module",
   "exports": {
-    ".": "./index.mjs",
-    "./serve": "./serve.mjs",
-    "./check": "./check.mjs",
-    "./errors": "./errors.mjs",
-    "./gif": "./gif.mjs",
-    "./launch": "./launch.mjs"
+    ".": "./node/index.mjs",
+    "./serve": "./node/serve.mjs",
+    "./check": "./node/check.mjs",
+    "./errors": "./node/errors.mjs",
+    "./gif": "./node/gif.mjs",
+    "./launch": "./node/launch.mjs"
   },
+  "files": ["node"],
+  "repository": { "type": "git", "url": "git+https://github.com/mishan/shotbox.git" },
   "license": "MIT",
   "author": "Misha Nasledov <misha@nasledov.com>",
   "private": true,

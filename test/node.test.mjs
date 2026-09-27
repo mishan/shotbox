@@ -5,17 +5,26 @@
  */
 
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs/promises';
 import http from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { checks, launch, serve, until } from '../node/index.mjs';
+import { checks, gif, launch, serve, until } from '../node/index.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 /* A request with the path exactly as written: fetch() tidies away the
    "../" a hostile client would send. */
+const has = (cmd) =>
+{
+    try { execFileSync(cmd, ['-version'], { stdio: 'ignore' }); return true; }
+    catch { return false; }
+};
+
 const raw = (site, where) => new Promise((ok, no) =>
     http.get({ host: '127.0.0.1', port: site.address().port, path: where },
              (res) => { res.resume(); ok(res.statusCode); }).on('error', no));
@@ -72,4 +81,41 @@ test('checks count failures and say each one', () =>
     assert.match(said, /^ok {4}one$/m);
     assert.match(said, /^FAIL {2}two$/m);
     assert.match(said, /^skip {2}three$/m);
+});
+
+test('gif cuts the start and keeps to the palette it is given',
+     { skip: !has('ffmpeg') && 'no ffmpeg' }, async () =>
+{
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'shotbox-test-'));
+    const film = path.join(dir, 'film.webm');
+    const frames = (file) => Number(execFileSync('ffprobe', [
+        '-v', 'error', '-count_frames', '-select_streams', 'v:0',
+        '-show_entries', 'stream=nb_read_frames', '-of', 'csv=p=0', file,
+    ]).toString().trim());
+
+    try
+    {
+        execFileSync('ffmpeg', ['-y', '-f', 'lavfi', '-i',
+                                'testsrc=size=160x120:rate=10:duration=2', film],
+                     { stdio: 'ignore' });
+
+        const all = await gif(film, path.join(dir, 'all.gif'),
+                              { width: 80, fps: 10 });
+        const cut = await gif(film, path.join(dir, 'cut.gif'),
+                              { width: 80, fps: 10, from: 1, colors: 16,
+                                dither: 'none' });
+
+        assert.equal(frames(all), 20);
+        assert.equal(frames(cut), 10);
+
+        /* Counted in the frames, not read off the header: ffmpeg writes
+           a full-sized color table whatever it puts in it. */
+        const used = execFileSync('identify', ['-format', '%k\n', cut])
+            .toString().trim().split('\n').map(Number);
+        assert.ok(Math.max(...used) <= 16, `colors per frame: ${used}`);
+    }
+    finally
+    {
+        await fs.rm(dir, { recursive: true, force: true });
+    }
 });
