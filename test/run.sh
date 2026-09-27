@@ -59,6 +59,17 @@ st=$?; set -e
 [ -s "$tmp/c-failed.png" ] && grep -q "c-failed.png" "$tmp/err" \
   && ok "a failed shoot leaves a picture of the screen" || fail "no -failed.png"
 
+# term --shoot, --crop in cells, and a program that's done before the picture.
+"$sb" term --shoot "$tmp/full.png" --size 40x10 --when there -- sh -c 'echo hi; echo there' >/dev/null \
+  && ok "term --shoot, and the terminal outlives its program" || fail "term --shoot"
+"$sb" term --shoot "$tmp/cells.png" --size 40x10 --crop 12x3 --when there -- \
+  sh -c 'echo hi; echo there' >/dev/null
+full=$(identify -format %wx%h "$tmp/full.png"); cells=$(identify -format %wx%h "$tmp/cells.png")
+[ "${cells%x*}" -lt $((${full%x*} / 3 + 2)) ] && [ "${cells#*x}" -lt $((${full#*x} / 3 + 2)) ] \
+  && ok "term --crop takes the top-left cells ($cells of $full)" || fail "term --crop: $cells of $full"
+set +e; "$sb" term --env A=b -- true 2>/dev/null; st=$?; set -e
+[ $st = 2 ] && ok "term takes session options only with --shoot" || fail "term --env: status $st"
+
 # Stable: waits out a burst of output, and gives up on output that never stops.
 "$sb" run -- sh -c "
   '$sb' term --size 30x5 --log '$tmp/burst.log' -- \
@@ -98,6 +109,20 @@ convert "$tmp/a.png" -fill red -draw 'point 3,3' "$tmp/d.png"
 set +e; n=$("$sb" compare "$tmp/a.png" "$tmp/d.png" --diff "$tmp/diff.png"); st=$?; set -e
 [ $st = 1 ] && [ "$n" = "1 pixels differ" ] && [ -s "$tmp/diff.png" ] \
   && ok "compare: one pixel off, found" || fail "compare: $st $n"
+
+mkdir -p "$tmp/ref" "$tmp/new"
+cp "$tmp/a.png" "$tmp/ref/same.png"; cp "$tmp/a.png" "$tmp/new/same.png"
+cp "$tmp/a.png" "$tmp/ref/off.png"; cp "$tmp/d.png" "$tmp/new/off.png"
+cp "$tmp/a.png" "$tmp/ref/gone.png"
+set +e; out=$("$sb" compare "$tmp/ref" "$tmp/new" --diff "$tmp/diffs"); st=$?; set -e
+[ $st = 1 ] && echo "$out" | grep -q "^same: the same" && echo "$out" | grep -q "^off: 1 pixels" \
+  && echo "$out" | grep -q "^gone: no" && [ -s "$tmp/diffs/off-diff.png" ] \
+  && ok "compare: directories, picture by picture" || fail "compare dirs: $st $out"
+"$sb" compare "$tmp/ref" "$tmp/new" same off --max 0 --max off=1 >/dev/null \
+  && ok "compare: NAMEs, and --max for one" || fail "compare NAME=N"
+set +e; "$sb" compare "$tmp/a.png" "$tmp/nope.png" 2> "$tmp/err"; st=$?; set -e
+[ $st = 2 ] && grep -q "no .*nope.png" "$tmp/err" && ok "compare: a missing picture, said plainly" \
+  || fail "compare missing: $st $(cat "$tmp/err")"
 
 # Node.
 node --test "$here"/node.test.mjs >"$tmp/node.log" 2>&1 && ok "node helpers" \

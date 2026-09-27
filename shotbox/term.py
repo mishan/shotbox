@@ -16,7 +16,18 @@ are text: grep it for 38;2;255;45;149.
 
 The scheme is JSON: Tilix's scheme format as is, or just
 {"foreground", "background", "cursor", "palette": [16 colors]}. The cursor
-doesn't blink, so it's never caught mid-blink.
+doesn't blink, so it's never caught mid-blink. The terminal stays open, its
+screen as the program left it, after the program exits.
+
+--crop COLSxROWS takes only the top-left COLS by ROWS cells: the terminal
+writes that part of its window, in pixels, to $SHOTBOX_SCRATCH/crop before
+the ready file, and `shotbox shoot` crops to it.
+
+--shoot OUT.png does the whole thing: starts a sealed session (the session
+options are shoot's), runs the terminal in it, waits for the steps and takes
+the picture. It's short for
+
+    shotbox shoot OUT.png --window shotbox-term --wait ready -- shotbox term ...
 """
 
 import argparse
@@ -26,6 +37,8 @@ import re
 import shlex
 import sys
 from pathlib import Path
+
+SIZE = re.compile(r"(\d+)x(\d+)")
 
 
 class Step(argparse.Action):
@@ -44,6 +57,16 @@ def parse(argv):
     p.add_argument("--when", action=Step, dest="when", metavar="REGEX")
     p.add_argument("--type", action=Step, dest="type", metavar="TEXT")
     p.add_argument("--sleep", action=Step, dest="sleep", metavar="SECS")
+    p.add_argument("--crop", metavar="COLSxROWS",
+                   help="take only the top-left COLS by ROWS cells")
+    g = p.add_argument_group("taking the picture too")
+    g.add_argument("--shoot", metavar="OUT.png",
+                   help="start a sealed session, run the terminal in it, and "
+                        "take the picture when the steps are done")
+    g.add_argument("--park", action="store_true", help="as for shoot")
+    g.add_argument("--failed", metavar="FILE", help="as for shoot")
+    from .__main__ import session_options
+    session_options(p)
     p.set_defaults(steps=[])
     cmd = []
     if "--" in argv:
@@ -53,7 +76,48 @@ def parse(argv):
     args.cmd = cmd
     if not args.cmd:
         p.error("no command given, after --")
+    for opt in ("size", "crop"):
+        if getattr(args, opt) and not SIZE.fullmatch(getattr(args, opt)):
+            p.error(f"--{opt} is COLSxROWS, like 80x24")
+    defaults = vars(p.parse_args([]))
+    given = [k for k, v in vars(args).items()
+             if k not in TERM_OPTS and k in defaults and v != defaults[k]]
+    if given and not args.shoot:
+        p.error("the session options, --park and --failed go with --shoot")
     return args
+
+
+# The options the terminal itself takes, as opposed to --shoot's.
+TERM_OPTS = ("scheme", "size", "font", "title", "log", "timeout", "crop", "steps", "shoot")
+
+
+def shoot(args):
+    """--shoot: `shotbox shoot` this terminal, with these steps."""
+    from .__main__ import cmd_shoot, self_command
+    inner = []
+    for opt in ("scheme", "size", "font", "title", "timeout", "crop"):
+        if getattr(args, opt) is not None:
+            inner += [f"--{opt}", str(getattr(args, opt))]
+    if args.log:
+        inner += ["--log", os.path.abspath(args.log)]
+    for kind, value in args.steps:
+        inner += [f"--{kind}", value]
+    # Long enough for every step to take its own timeout.
+    whens = sum(kind == "when" for kind, _ in args.steps)
+    sleeps = sum(float(v) for kind, v in args.steps if kind == "sleep")
+    outer = [args.shoot, "--window", re.escape(args.title), "--wait", "ready",
+             "--timeout", f"{args.timeout * max(1, whens) + sleeps + 10:g}",
+             "--screen", "x".join(map(str, args.screen))]
+    outer += ["--park"] * args.park + ["--desktop"] * args.desktop
+    outer += ["--system-bus"] * args.system_bus + ["--keep"] * args.keep
+    for opt, value in (("--failed", args.failed), ("--seed", args.seed)):
+        if value:
+            outer += [opt, value]
+    for e in args.env:
+        outer += ["--env", e]
+    for n in args.passthrough:
+        outer += ["--pass", n]
+    return cmd_shoot(outer + ["--", *self_command(), "term", *inner, "--", *args.cmd])
 
 
 def load_scheme(path):
@@ -74,6 +138,8 @@ def unescape(text):
 
 def main(argv):
     args = parse(argv)
+    if args.shoot:
+        return shoot(args)
 
     import gi
     gi.require_version("Gtk", "3.0")
@@ -114,6 +180,14 @@ def main(argv):
         except AttributeError:
             return term.get_text()[0] or ""
 
+    def crop_geometry():
+        """The top-left --crop cells, in pixels, padding included."""
+        c, r = map(int, args.crop.split("x"))
+        pad = term.get_style_context().get_padding(term.get_state_flags())
+        w = pad.left + c * term.get_char_width() + pad.right
+        h = pad.top + r * term.get_char_height() + pad.bottom
+        return f"{w}x{h}+0+0"
+
     steps = list(args.steps)
     state = {"since": GLib.get_monotonic_time()}
 
@@ -126,6 +200,8 @@ def main(argv):
     def tick():
         if not steps:
             scratch = os.environ.get("SHOTBOX_SCRATCH")
+            if scratch and args.crop:
+                Path(scratch, "crop").write_text(crop_geometry())
             if scratch:
                 Path(scratch, "ready").touch()
             return False
