@@ -30,10 +30,23 @@ and publishes to PyPI and npm.
   (Account settings, Publishing): owner `mishan`, repository `shotbox`,
   workflow `release.yml`, environment `pypi`. The first release creates the
   project; no token.
-- **npm:** trusted publishing is set up from a package's own settings, so
-  it can't be for the first release. Make a granular access token that can
-  publish, add it to the repository's secrets as `NPM_TOKEN`, and release.
+- **npm:** no token, ever; keep 2FA on. npm sets up trusted publishing
+  from a package's own settings, so the package has to exist first, and
+  staged publishing needs it to exist too. So the first release goes out
+  by hand, from a checkout of the release commit, before its tag is
+  pushed, with your 2FA code:
+
+  ```
+  npm ci
+  npm publish
+  ```
+
   Then, on npmjs.com, in the package's settings, add a trusted publisher:
   GitHub Actions, `mishan/shotbox`, workflow `release.yml`, environment
-  `npm`. Delete the secret and the token once a release has gone out
-  without them.
+  `npm`, and push the tag. The workflow skips a version npm already has;
+  every later release it publishes itself, with provenance, which npm adds
+  to what trusted publishing publishes.
+
+To approve each npm release by hand rather than have the tag publish it,
+make the workflow's last step `npm stage publish` and approve it with
+`npm stage approve`, which asks for 2FA.

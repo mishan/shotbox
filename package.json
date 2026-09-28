@@ -24,7 +24,7 @@
   "license": "MIT",
   "author": "Misha Nasledov <misha@nasledov.com>",
   "engines": { "node": ">=18" },
-  "publishConfig": { "access": "public", "provenance": true },
+  "publishConfig": { "access": "public" },
   "scripts": {
     "types": "tsc",
     "prepublishOnly": "tsc"
