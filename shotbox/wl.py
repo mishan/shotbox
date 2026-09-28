@@ -14,7 +14,7 @@ import struct
 import subprocess
 from pathlib import Path
 
-from .x import QUIET_PNG
+from .x import CONVERT, QUIET_PNG
 
 MAGIC = b"i3-ipc"
 RUN_COMMAND, GET_TREE, GET_VERSION = 0, 4, 7
@@ -83,7 +83,7 @@ def capture(env, out, window=None, crop=None):
     ImageMagick writes it, so the PNG has no timestamps."""
     shot = subprocess.run(["grim", *_region(window), "-t", "ppm", "-"], env=env,
                           capture_output=True, check=True).stdout
-    cmd = ["convert", "ppm:-"]
+    cmd = [*CONVERT, "ppm:-"]
     if crop:
         cmd += ["-crop", crop, "+repage"]
     subprocess.run(cmd + QUIET_PNG + [str(out)], input=shot, check=True)
