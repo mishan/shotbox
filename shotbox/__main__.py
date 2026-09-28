@@ -64,9 +64,9 @@ def make_session(a):
 
 def self_command():
     """How to run this shotbox again, from inside a session: this checkout's
-    bin/shotbox, or else whichever is on PATH."""
+    bin/shotbox, or else this Python's shotbox module, as installed."""
     here = Path(__file__).resolve().parent.parent / "bin" / "shotbox"
-    return [sys.executable, str(here)] if here.exists() else ["shotbox"]
+    return [sys.executable, str(here)] if here.exists() else [sys.executable, "-m", "shotbox"]
 
 
 def split(argv):

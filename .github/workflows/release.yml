@@ -1,0 +1,66 @@
+# Publish a release: pushing a tag vX.Y.Z runs ci.yml first, then publishes
+# the Python package to PyPI and the Node package to npm, each only if the
+# tag is its version. Both publish over GitHub's OIDC, trusted publishing:
+# no token is kept anywhere. docs/releasing.md has the one-time setup and
+# the steps for a release.
+
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
+
+  pypi:
+    needs: test
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: The tag is the version
+        run: |
+          v=$(python3 -c "import shotbox; print(shotbox.__version__)")
+          [ "${GITHUB_REF_NAME#v}" = "$v" ] || { echo "tag $GITHUB_REF_NAME, version $v"; exit 1; }
+      - name: Build
+        run: |
+          python3 -m venv /tmp/build
+          /tmp/build/bin/pip install -q build
+          /tmp/build/bin/python -m build --outdir dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  npm:
+    needs: test
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      # npm 11.5.1 or later, for trusted publishing.
+      - run: npm install -g npm@^11.5.1
+      - name: The tag is the version
+        id: version
+        run: |
+          v=$(node -p "require('./package.json').version")
+          [ "${GITHUB_REF_NAME#v}" = "$v" ] || { echo "tag $GITHUB_REF_NAME, version $v"; exit 1; }
+          # Already there: published by hand (the first release has to be,
+          # see docs/releasing.md), or a rerun. Trusted publishing adds
+          # provenance to the rest.
+          if npm view "shotbox@$v" version >/dev/null 2>&1; then
+            echo "shotbox $v is already on npm"
+            echo "published=yes" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.version.outputs.published != 'yes'
+        run: npm ci && npm publish

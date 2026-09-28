@@ -41,8 +41,12 @@ Needs `Xvfb`, `xauth`, `dbus-daemon`, ImageMagick and `xwininfo`; for
 
 ```
 sudo apt install xvfb xauth dbus-daemon imagemagick x11-utils gir1.2-vte-2.91
-ln -s "$PWD/bin/shotbox" ~/.local/bin/shotbox
+pipx install --system-site-packages shotbox
 ```
+
+`--system-site-packages` lets it see the system's PyGObject, which
+`shotbox term` uses; `pip install shotbox` works too. Or run it from a
+checkout: `ln -s "$PWD/bin/shotbox" ~/.local/bin/shotbox`.
 
 No Python packages: it's the standard library and those tools. Wayland
 sessions need more; see [Wayland](#wayland).
@@ -201,7 +205,8 @@ with shotbox.Session(size=(1600, 1000), failed="out/chat-failed.png") as s:
 - A `Session` also has `spawn(cmd, log=None)`, `run(cmd)`, `env` and
   `scratch`.
 
-With a checkout, put its root on `PYTHONPATH` (`--pass PYTHONPATH` to let it
+Installed, `import shotbox` just works. With a checkout, put its root on
+`PYTHONPATH` (`--pass PYTHONPATH` to let it
 into a session).
 
 ## Node
@@ -278,10 +283,10 @@ It has TypeScript declarations, written by hand beside each module and
 checked by `npm run types`. `dress`, `film` and `pageErrors` take
 Playwright's `Page`, so they want Playwright's own types installed.
 
-Its `package.json` is at the top of the repository, since npm installs
-from the top of a git repository and nowhere else:
-`"shotbox": "github:mishan/shotbox"` in `devDependencies`, or
-`"file:../shotbox"` for a checkout beside yours.
+`npm install --save-dev shotbox`. Its `package.json` is at the top of the
+repository, since npm installs from the top of a git repository and
+nowhere else, so `"shotbox": "github:mishan/shotbox"` in `devDependencies`
+works too, or `"file:../shotbox"` for a checkout beside yours.
 
 ## Tests
 

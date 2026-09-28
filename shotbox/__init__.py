@@ -2,7 +2,9 @@
 display of the `shotbox run` a script is inside, and both are a `Screen`, to
 wait on, drive and take pictures of. See shotbox/screen.py."""
 
-from .screen import Screen, SessionError, here
-from .session import Session
+__version__ = "0.3.0"
 
-__all__ = ["Screen", "Session", "SessionError", "here"]
+from .screen import Screen, SessionError, here  # noqa: E402
+from .session import Session  # noqa: E402
+
+__all__ = ["Screen", "Session", "SessionError", "here", "__version__"]

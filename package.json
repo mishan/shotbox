@@ -1,7 +1,8 @@
 {
   "name": "shotbox",
   "version": "0.3.0",
-  "description": "Helpers for reproducible browser screenshots and checks: a static server, a check reporter, page errors, process-group launch, webm to GIF, a sealed environment for a browser",
+  "description": "Playwright helpers for reproducible browser screenshots and recordings: a static server, a sealed browser environment, frame-by-frame recordings, captions, GIFs, page errors and checks. The shotbox command itself is on PyPI.",
+  "keywords": ["screenshots", "playwright", "visual-regression", "testing", "recording", "gif", "reproducible"],
   "type": "module",
   "exports": {
     ".": "./node/index.mjs",
@@ -18,12 +19,15 @@
   "bin": { "shotbox-serve": "node/serve.mjs" },
   "files": ["node"],
   "repository": { "type": "git", "url": "git+https://github.com/mishan/shotbox.git" },
+  "homepage": "https://github.com/mishan/shotbox#node",
+  "bugs": "https://github.com/mishan/shotbox/issues",
   "license": "MIT",
   "author": "Misha Nasledov <misha@nasledov.com>",
-  "private": true,
   "engines": { "node": ">=18" },
+  "publishConfig": { "access": "public" },
   "scripts": {
-    "types": "tsc"
+    "types": "tsc",
+    "prepublishOnly": "tsc"
   },
   "devDependencies": {
     "@types/node": "22.20.4",

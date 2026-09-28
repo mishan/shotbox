@@ -11,6 +11,8 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  # The release workflow runs this first, and publishes only if it passes.
+  workflow_call:
 
 permissions:
   contents: read
@@ -47,3 +49,44 @@ jobs:
         env:
           SHOTBOX_BROWSER: required
           SHOTBOX_WAYLAND: required
+
+  # What gets published, built and used the way someone who installs it
+  # would: the wheel in a fresh venv (with the system's PyGObject, as the
+  # README says, so `term --shoot` can start itself again from an install
+  # rather than a checkout), and the npm tarball in a fresh project.
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install what shotbox runs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            xvfb xauth dbus-daemon imagemagick x11-utils \
+            python3-venv python3-gi gir1.2-vte-2.91 fonts-dejavu-core
+
+      - name: The Python package, from a fresh venv
+        run: |
+          python3 -m venv /tmp/build
+          /tmp/build/bin/pip install -q build
+          /tmp/build/bin/python -m build --outdir dist
+          python3 -m venv --system-site-packages /tmp/use
+          /tmp/use/bin/pip install -q dist/*.whl
+          cd /tmp
+          /tmp/use/bin/python -c "import shotbox; print(shotbox.__version__)"
+          /tmp/use/bin/shotbox run -- true
+          /tmp/use/bin/shotbox term --shoot /tmp/term.png --size 30x4 --when hi -- echo hi
+          test -s /tmp/term.png
+
+      - name: The Node package, from a fresh project
+        run: |
+          npm pack --pack-destination /tmp
+          mkdir /tmp/project && cd /tmp/project
+          npm init -y >/dev/null
+          npm install -q /tmp/shotbox-*.tgz
+          node -e "import('shotbox').then(m => { for (const f of ['serve', 'checks', 'launch', 'gif', 'frames']) if (typeof m[f] !== 'function') throw new Error(f); console.log(Object.keys(m).join(' ')) })"
