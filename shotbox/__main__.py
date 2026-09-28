@@ -110,7 +110,8 @@ def cmd_shoot(argv):
                     "take a screenshot, and stop it.")
     p.add_argument("out", help="the PNG to write")
     p.add_argument("--window", metavar="RE",
-                   help="take this window (its name, a regex matched in full) "
+                   help="take this window (its title, a regex matched in full, "
+                        "or app=RE for its app id) "
                         "instead of the whole display; also waits for it")
     p.add_argument("--crop", metavar="WxH+X+Y",
                    help="then crop to this; without it, to what the program "
@@ -181,7 +182,8 @@ def cmd_wait(argv):
                                             "screen to stop changing.")
     p.add_argument("kind", choices=("window", "port", "file", "ready", "stable"))
     p.add_argument("arg", nargs="?", default="",
-                   help="the window's name (a regex), the port, the file; for "
+                   help="the window's title (a regex; app=RE for its app id), the "
+                        "port, the file; for "
                         "stable, how long it must hold still (0.5)")
     p.add_argument("--window", metavar="RE",
                    help="for stable: watch this window rather than the display")

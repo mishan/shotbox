@@ -83,8 +83,9 @@ fall back to X.
 - **Xwayland isn't Xvfb either.** An X client there has no XSETTINGS to
   read, so GTK falls back to 96 dpi and draws its text smaller than the
   same program does as a Wayland client, as it would on a desktop.
-- **A window's name** is its title, as on X11. Matching on the app id
-  may come later.
+- **A window's name** is its title, as on X11, and `app=RE` matches its
+  app id: a Wayland window's `app_id`, or an X one's `WM_CLASS` under
+  Xwayland, the same as on Xvfb.
 
 ## Phases
 
@@ -108,7 +109,8 @@ fall back to X.
    twice early on and never again. What wtype hit wasn't pinned down.
    The tests type through twenty keyboards, one per key, and fail on a
    missing one.
-3. **The rest.** Matching on app id, and a README section of its own.
+3. **The rest.** Matching on app id (`app=RE`, on X11 too), and a
+   README section of its own. *Done.*
 4. **Using it.** neon-doll's `cosmic-shoot.sh` already runs COSMIC's
    compositor nested in a headless sway and takes it with `grim`; it
    becomes a `shotbox run --wayland`.

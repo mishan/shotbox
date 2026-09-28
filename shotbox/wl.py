@@ -8,13 +8,12 @@ to install beyond those two.
 
 import hashlib
 import json
-import re
 import socket
 import struct
 import subprocess
 from pathlib import Path
 
-from .x import QUIET_PNG
+from .x import QUIET_PNG, matcher
 
 MAGIC = b"i3-ipc"
 RUN_COMMAND, GET_OUTPUTS, GET_TREE, GET_VERSION = 0, 3, 4, 7
@@ -44,14 +43,18 @@ def _read(s, n):
 
 def windows(env):
     """Every window, Wayland and X alike: (id, name, width, height, x, y,
-    visible), x and y absolute."""
+    app ids, visible), x and y absolute. A Wayland window's app id is its
+    app_id; an X one's, under Xwayland, its WM_CLASS instance and class."""
     found = []
 
     def walk(node):
         if node.get("pid") is not None:
             r = node["rect"]
+            props = node.get("window_properties") or {}
+            apps = tuple(a for a in (node.get("app_id"), props.get("instance"),
+                                     props.get("class")) if a)
             found.append((node["id"], node.get("name") or "", r["width"], r["height"],
-                          r["x"], r["y"], node.get("visible", False)))
+                          r["x"], r["y"], apps, node.get("visible", False)))
         for child in node.get("nodes", []) + node.get("floating_nodes", []):
             walk(child)
 
@@ -59,12 +62,12 @@ def windows(env):
     return found
 
 
-def find_window(env, name):
-    """The biggest visible window whose name (its title) matches `name`, a
-    regex matched in full, or None. The same rule as x.find_window, less
-    the 1x1 helpers, which Wayland doesn't have."""
-    pattern = re.compile(name)
-    hits = [w[:6] for w in windows(env) if w[6] and pattern.fullmatch(w[1])]
+def find_window(env, spec):
+    """The biggest visible window `spec` asks for (see x.matcher), or None:
+    the same rule as x.find_window, less the 1x1 helpers, which Wayland
+    doesn't have."""
+    test, _ = matcher(spec)
+    hits = [w[:6] for w in windows(env) if w[7] and test(w[1], w[6])]
     return max(hits, key=lambda w: w[2] * w[3]) if hits else None
 
 

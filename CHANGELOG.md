@@ -16,6 +16,9 @@ do on X11. A Playwright recording can come out the same each run.
   `key`, `type`, `click`, `move`, `drag` and `park` speak sway's virtual
   keyboard and pointer protocols directly, reaching Xwayland's X clients
   too. See docs/wayland.md.
+- **Windows by app id.** Wherever a window is named, `app=RE` matches its
+  app id rather than its title: a Wayland window's `app_id`, or an X
+  window's `WM_CLASS`, instance or class.
 
 - **`frames(page)`**, a Playwright recording that comes out the same
   each run: the page's time stands still and moves a frame between

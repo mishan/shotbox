@@ -73,10 +73,11 @@ class Screen:
     # --- waiting --------------------------------------------------------------
 
     def test(self, kind, arg="", window=None):
-        """What to say, and what to poll, for a wait: window (a regex), port,
+        """What to say, and what to poll, for a wait: window (a regex for
+        its title, or app=RE for its app id), port,
         file, ready, or stable (seconds; `window` to watch just that one)."""
         if kind == "window":
-            return f"a window named {arg!r}", lambda: self.backend.find_window(self.env, arg)
+            return f"a {x.matcher(arg)[1]}", lambda: self.backend.find_window(self.env, arg)
         if kind == "port":
             return f"port {arg}", lambda: x.port_open(int(arg))
         if kind == "file":
@@ -93,8 +94,9 @@ class Screen:
                            "(window, port, file, ready or stable)")
 
     def wait_window(self, name, timeout=30):
-        """Wait for a viewable window whose name matches `name` (a regex,
-        matched in full); its (id, name, width, height, x, y)."""
+        """Wait for a viewable window whose title matches `name` (a regex,
+        matched in full), or, with app=RE, whose app id does; its (id, name,
+        width, height, x, y)."""
         return self.until(*self.test("window", name), timeout)
 
     def wait_port(self, port, timeout=30):
@@ -116,10 +118,10 @@ class Screen:
     # --- windows and pictures -------------------------------------------------
 
     def window(self, name):
-        """The window named `name` (a regex, matched in full), or fail."""
+        """The window `name` asks for (a title regex, or app=RE), or fail."""
         w = self.backend.find_window(self.env, name)
         if not w:
-            self.fail(f"no window named {name!r}")
+            self.fail(f"no {x.matcher(name)[1]}")
         return w
 
     def capture(self, out, window=None, crop=None, park=False):

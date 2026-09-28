@@ -70,6 +70,16 @@ full=$(identify -format %wx%h "$tmp/full.png"); cells=$(identify -format %wx%h "
 set +e; "$sb" term --env A=b -- true 2>/dev/null; st=$?; set -e
 [ $st = 2 ] && ok "term takes session options only with --shoot" || fail "term --env: status $st"
 
+# A window by its app id: WM_CLASS, instance or class.
+"$sb" shoot "$tmp/app1.png" --window app=window.py -- "$here/window.py" t1 >/dev/null
+"$sb" shoot "$tmp/app2.png" --window app=Window.py -- "$here/window.py" t1 >/dev/null
+[ "$(identify -format %wx%h "$tmp/app1.png")" = 200x120 ] && cmp -s "$tmp/app1.png" "$tmp/app2.png" \
+  && ok "a window by its app id" || fail "app="
+set +e; "$sb" shoot "$tmp/app3.png" --window app=nope --timeout 1 -- "$here/window.py" t1 2> "$tmp/err"
+st=$?; set -e
+[ $st != 0 ] && grep -q "window with app id 'nope'" "$tmp/err" && ok "app=: a miss says what it looked for" \
+  || fail "app= miss: $st"
+
 # Stable: waits out a burst of output, and gives up on output that never stops.
 "$sb" run -- sh -c "
   '$sb' term --size 30x5 --log '$tmp/burst.log' -- \
@@ -129,6 +139,13 @@ if command -v sway >/dev/null && command -v grim >/dev/null && command -v Xwayla
     '$sb' wait window wl-x11 && '$sb' capture '$tmp/w5.png' --window wl-x11" \
     && [ "$(identify -format %wx%h "$tmp/w5.png")" = 200x120 ] \
     && ok "xwayland: an X client found and taken" || fail "xwayland"
+  "$sb" shoot "$tmp/w7.png" --wayland --window app=window.py -- "$win" wl-test >/dev/null \
+    && cmp -s "$tmp/w1.png" "$tmp/w7.png" && ok "wayland: a window by its app_id" \
+    || fail "wayland: app="
+  "$sb" run --xwayland -- sh -c "GDK_BACKEND=x11 '$win' wl-x11 &
+    '$sb' wait window app=Window.py && '$sb' capture '$tmp/w8.png' --window app=Window.py" \
+    && cmp -s "$tmp/w5.png" "$tmp/w8.png" && ok "xwayland: an X window by its WM_CLASS" \
+    || fail "xwayland: app="
   "$sb" term --shoot "$tmp/w6.png" --wayland --size 30x5 --crop 12x3 --when there -- \
     sh -c 'echo hi; echo there' >/dev/null \
     && ok "wayland: term --shoot, cropped ($(identify -format %wx%h "$tmp/w6.png"))" \

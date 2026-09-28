@@ -12,19 +12,35 @@ import sys
 import time
 from pathlib import Path
 
-TREE_LINE = re.compile(r'^\s*(0x[0-9a-f]+) "(.*)":.*?(\d+)x(\d+)\+-?\d+\+-?\d+\s+\+(-?\d+)\+(-?\d+)\s*$')
+TREE_LINE = re.compile(r'^\s*(0x[0-9a-f]+) "(.*)": \((?:"(.*?)" "(.*?)")?\)'
+                       r'\s+(\d+)x(\d+)\+-?\d+\+-?\d+\s+\+(-?\d+)\+(-?\d+)\s*$')
+
+
+def matcher(spec):
+    """What a window is asked for by: a regex for its name (its title),
+    matched in full, or app=RE for its app id: a Wayland window's app_id,
+    or either half of an X window's WM_CLASS, its instance or its class.
+    A test of (name, app ids), and how to say what it's looking for."""
+    if spec.startswith("app="):
+        pattern = re.compile(spec[4:])
+        return (lambda name, apps: any(pattern.fullmatch(a) for a in apps),
+                f"window with app id {spec[4:]!r}")
+    pattern = re.compile(spec)
+    return lambda name, apps: bool(pattern.fullmatch(name)), f"window named {spec!r}"
 
 
 def windows(env):
-    """Every named window: (id, name, width, height, x, y), x and y absolute."""
+    """Every named window: (id, name, width, height, x, y, app ids), x and y
+    absolute, the app ids its WM_CLASS."""
     out = subprocess.run(["xwininfo", "-root", "-tree"], env=env,
                          capture_output=True, text=True).stdout
     found = []
     for line in out.splitlines():
         m = TREE_LINE.match(line)
         if m:
-            wid, name, w, h, x, y = m.groups()
-            found.append((wid, name, int(w), int(h), int(x), int(y)))
+            wid, name, instance, klass, w, h, x, y = m.groups()
+            apps = tuple(a for a in (instance, klass) if a)
+            found.append((wid, name, int(w), int(h), int(x), int(y), apps))
     return found
 
 
@@ -34,12 +50,12 @@ def viewable(env, wid):
     return "Map State: IsViewable" in out
 
 
-def find_window(env, name):
-    """The biggest viewable window whose name matches `name` (a regex, matched
-    in full), or None. Biggest, because toolkits often name a 1x1 helper
-    window after the app too."""
-    pattern = re.compile(name)
-    hits = [w for w in windows(env) if pattern.fullmatch(w[1]) and w[2] > 1 and w[3] > 1]
+def find_window(env, spec):
+    """The biggest viewable window `spec` asks for (see matcher), as (id,
+    name, width, height, x, y), or None. Biggest, because toolkits often
+    name a 1x1 helper window after the app too."""
+    test, _ = matcher(spec)
+    hits = [w[:6] for w in windows(env) if test(w[1], w[6]) and w[2] > 1 and w[3] > 1]
     hits = [w for w in hits if viewable(env, w[0])]
     return max(hits, key=lambda w: w[2] * w[3]) if hits else None
 

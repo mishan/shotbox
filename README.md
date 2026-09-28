@@ -44,17 +44,19 @@ sudo apt install xvfb xauth dbus-daemon imagemagick x11-utils gir1.2-vte-2.91
 ln -s "$PWD/bin/shotbox" ~/.local/bin/shotbox
 ```
 
-No Python packages: it's the standard library and those tools. For
-Wayland sessions, `sway` and `grim`, and `Xwayland` for X clients in them:
-`sudo apt install sway grim xwayland`.
+No Python packages: it's the standard library and those tools. Wayland
+sessions need more; see [Wayland](#wayland).
 
 ## Commands
 
 **`shotbox shoot OUT.png [options] -- COMMAND...`** starts the command in a
 sealed session, waits, takes the picture and stops everything.
 
-- `--window RE` takes that window (its name, a regex matched in full) rather
-  than the whole display, and waits for it to appear.
+- `--window RE` takes that window (its title, a regex matched in full)
+  rather than the whole display, and waits for it to appear. `app=RE`
+  matches its app id instead: a Wayland window's `app_id`, or an X
+  window's `WM_CLASS`, instance or class. Every `--window` and every
+  `window` wait takes either.
 - `--wait window:RE|port:N|file:PATH|ready|stable[:SECS]` waits for more
   (repeatable, in order). `ready` is `$SHOTBOX_SCRATCH/ready` existing;
   `shotbox term` writes it. `stable` is the `--window` (or the whole display)
@@ -90,13 +92,8 @@ and `--pass NAME` to set or let through variables; `--seed DIR` to start the
 home as a copy of a directory (a config, a profile, sample files);
 `--desktop` for real GSettings and the system's D-Bus services, which a
 desktop shell needs; `--system-bus` for a stand-in system bus; `--keep` to
-keep the scratch dir and say where it is.
-
-`--wayland` makes the session a Wayland one, under a headless sway drawing
-in software, rather than X11 on Xvfb; `--xwayland` adds an Xwayland in it,
-for X clients the way they run on a Wayland desktop. Windows, pictures,
-waits, keys, the pointer and `term` work the same, the input over sway's
-virtual keyboard and pointer. See [docs/wayland.md](docs/wayland.md).
+keep the scratch dir and say where it is; `--wayland` and `--xwayland`
+for a [Wayland](#wayland) session.
 
 **`shotbox term [options] -- COMMAND...`** is a terminal to take pictures of:
 VTE, the engine behind GNOME Terminal, Ptyxis and Tilix, in a plain window
@@ -142,6 +139,32 @@ take `NAME=VALUE` for one picture, beside a plain VALUE for the rest:
 shotbox compare data/screenshots fresh --fuzz 0.5% --fuzz video=5% --diff fresh
 ```
 
+## Wayland
+
+`--wayland` makes a session a Wayland one: the program runs under a
+headless sway, drawing in software, instead of on Xvfb. `--xwayland` adds
+an Xwayland to it, and `DISPLAY`, so an X client runs the way it does on a
+Wayland desktop, GTK programs made to with `--env GDK_BACKEND=x11`.
+
+```
+shotbox shoot editor.png --wayland --window app=org.gnome.TextEditor -- gnome-text-editor
+```
+
+Everything else is the same: windows by title or `app=`, pictures, waits,
+failure pictures, keys, text, the pointer, `park`, `term` and the Python
+API (`shotbox.Session(wayland=True)`, or `here()` inside). Windows come
+from sway's IPC socket and pictures from `grim`; keys and the pointer go
+over sway's virtual keyboard and pointer, from a small client of
+shotbox's own, as XTEST does on X11.
+
+The pictures aren't X11's: GTK draws its own decorations on Wayland,
+and under Xwayland, with no XSETTINGS, its text at 96 dpi. A committed
+picture belongs to one backend.
+
+Needs `sway` and `grim`, and `Xwayland` for `--xwayland`:
+`sudo apt install sway grim xwayland`. Why sway, and how it fits:
+[docs/wayland.md](docs/wayland.md).
+
 ## Python
 
 A script that takes many pictures can drive the display itself rather than
@@ -161,7 +184,8 @@ with shotbox.Session(size=(1600, 1000), failed="out/chat-failed.png") as s:
     s.capture("out/chat.png", window="GtkHx.*", park=True)
 ```
 
-- Waits: `wait_window(re)` (returns `(id, name, w, h, x, y)`),
+- Waits: `wait_window(re)` (a title, or `app=RE`; returns
+  `(id, name, w, h, x, y)`),
   `wait_port(n)`, `wait_file(path)`, `wait_ready()`,
   `wait_stable(secs=0.5, window=None)`, and `until(what, test)` for a test
   of your own; each takes `timeout` (30).
