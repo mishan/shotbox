@@ -5,7 +5,9 @@
  */
 
 export { checks } from './check.mjs';
+export { dress } from './dress.mjs';
 export { pageErrors } from './errors.mjs';
+export { film } from './film.mjs';
 export { gif } from './gif.mjs';
 export { launch, until } from './launch.mjs';
 export { sealed } from './sealed.mjs';

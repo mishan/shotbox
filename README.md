@@ -177,7 +177,8 @@ into a session).
 pieces several projects had copied between them:
 
 ```js
-import { serve, checks, pageErrors, launch, until, gif, sealed } from 'shotbox';
+import { serve, checks, pageErrors, launch, until, gif, sealed,
+         dress, film } from 'shotbox';
 ```
 
 - `serve(dir, port = 0)`: a static server on localhost that serves ES
@@ -199,6 +200,28 @@ import { serve, checks, pageErrors, launch, until, gif, sealed } from 'shotbox';
   its `env` to `chromium.launch({ env })` and `close()` it afterwards.
   `pass` (a list of names) and `env` (an object) do what `--pass` and
   `--env` do.
+- `dress(page, { hold })`: a pointer and captions for a recording, since
+  a browser records neither its cursor nor a key pressed. A dot follows
+  the mouse and shrinks while a button is down; `caption(text)` shows a
+  caption at the bottom for `hold` ms (1300). Both come back after a
+  reload; `remove()` takes them out for a still.
+- `film(page)`: where the loop starts in a recording. Call it right after
+  `newPage()`, `start()` when the loop begins, and `end()` closes the
+  context and resolves to the video, for `gif(video, out, { from:
+  reel.from })`. Playwright writes a frame only when the page repaints.
+
+```js
+const context = await browser.newContext({ recordVideo: { dir } });
+const page = await context.newPage();
+const reel = film(page);
+await page.goto(url);
+const dressing = await dress(page);
+reel.start();
+await page.mouse.move(400, 300, { steps: 24 });
+await dressing.caption('Alt  Enter');
+await page.keyboard.press('Alt+Enter');
+await gif(await reel.end(), 'demo.gif', { from: reel.from });
+```
 
 Its `package.json` is at the top of the repository, since npm installs
 from the top of a git repository and nowhere else:
@@ -209,7 +232,9 @@ from the top of a git repository and nowhere else:
 
 `test/run.sh` checks the session, the terminal, the pictures, the Python
 API (`test/api.py`, which needs GTK 3's PyGObject) and the Node helpers, and
-takes a few seconds.
+takes a few seconds. The helpers that need a browser use Playwright's
+Chromium (`npm install && npx playwright install chromium`) and skip
+without it.
 
 ## License
 
