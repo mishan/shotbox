@@ -1,5 +1,8 @@
 # shotbox
 
+[![PyPI](https://img.shields.io/pypi/v/shotbox)](https://pypi.org/project/shotbox/)
+[![npm](https://img.shields.io/npm/v/shotbox)](https://www.npmjs.com/package/shotbox)
+
 Reproducible screenshots of real programs, taken where they can't touch your
 desktop.
 
