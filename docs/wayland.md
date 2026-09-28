@@ -111,9 +111,15 @@ fall back to X.
    missing one.
 3. **The rest.** Matching on app id (`app=RE`, on X11 too), and a
    README section of its own. *Done.*
-4. **Using it.** neon-doll's `cosmic-shoot.sh` already runs COSMIC's
-   compositor nested in a headless sway and takes it with `grim`; it
-   becomes a `shotbox run --wayland`.
+4. **Using it.** neon-doll's `cosmic-shoot.sh` ran COSMIC's compositor
+   nested in a headless sway of its own, with sleeps between steps; it
+   is now a `shotbox run --wayland` with waits for each step, twice as
+   fast, the same pictures (mishan/neon-doll#6). *Done.*
+
+   It showed one thing worth knowing: what runs inside a nested
+   compositor isn't a window sway can see, so the sign it has come up is
+   the screen changing, and a clock on the screen changes by itself.
+   Watch a part of the screen without one.
 
 ## Needs
 
