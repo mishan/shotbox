@@ -13,7 +13,7 @@ import struct
 import subprocess
 from pathlib import Path
 
-from .x import QUIET_PNG, matcher
+from .x import CONVERT, QUIET_PNG, matcher
 
 MAGIC = b"i3-ipc"
 RUN_COMMAND, GET_OUTPUTS, GET_TREE, GET_VERSION = 0, 3, 4, 7
@@ -58,7 +58,12 @@ def windows(env):
         for child in node.get("nodes", []) + node.get("floating_nodes", []):
             walk(child)
 
-    walk(ipc(env, GET_TREE))
+    try:
+        tree = ipc(env, GET_TREE)
+    except OSError as e:
+        from .screen import SessionError
+        raise SessionError(f"sway has gone away ({e.strerror or e})")
+    walk(tree)
     return found
 
 
@@ -81,7 +86,7 @@ def capture(env, out, window=None, crop=None):
     ImageMagick writes it, so the PNG has no timestamps."""
     shot = subprocess.run(["grim", *_region(window), "-t", "ppm", "-"], env=env,
                           capture_output=True, check=True).stdout
-    cmd = ["convert", "ppm:-"]
+    cmd = [*CONVERT, "ppm:-"]
     if crop:
         cmd += ["-crop", crop, "+repage"]
     subprocess.run(cmd + QUIET_PNG + [str(out)], input=shot, check=True)

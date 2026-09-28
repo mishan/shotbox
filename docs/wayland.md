@@ -71,7 +71,9 @@ waiting on and taking a picture of one is the same.
 
 Xwayland is asked for rather than always there: it's a second server to
 start and stop, and a session without it can't have a program quietly
-fall back to X.
+fall back to X. Unlike the Xvfb sessions, it has no Xauthority cookie:
+wlroots doesn't give it one, so any local program that finds its socket
+can connect for as long as the session lasts.
 
 ## What differs from X11
 
@@ -100,8 +102,11 @@ fall back to X.
    the session, reaching Xwayland's X clients too. *Done.*
 
    The spike lost the first key `wtype` sent, so the keyboard is made
-   with one fixed keymap holding every key shotbox can press, each
-   symbol on a key of its own (no Shift, no keymap changes), and a new
+   with one fixed keymap holding every key shotbox can press, laid out
+   as a US keyboard is (a and A, 1 and !, Tab and back-tab on one key,
+   so Shift in a chord gives the shifted symbol, as on X11; a first
+   version put each symbol on a key of its own, and `shift+a` typed
+   `a`), and a new
    keyboard presses a key with no symbol first and waits a moment. Over
    about 150 runs of typing into a GTK 4 entry, cold and under load, the
    shipped keyboard lost nothing, and nor did one without the blank key

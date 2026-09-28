@@ -80,11 +80,13 @@ BUS_CONFIG = """<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Config
 
 # sway, headless: one output the size of the screen, no borders or gaps,
 # and every window floating at 0,0 at the size it asks for, the way an X
-# client comes up on Xvfb with no window manager.
+# client comes up on Xvfb with no window manager. No swaynag: a complaint
+# about the config would be drawn into the pictures.
 SWAY_CONFIG = """output * resolution {width}x{height} position 0 0
 default_border none
 default_floating_border none
 focus_follows_mouse no
+swaynag_command -
 for_window [all] floating enable, move position 0 0
 xwayland {xwayland}
 """
@@ -264,17 +266,19 @@ class Session(Screen):
         except SessionError as e:
             raise SessionError(f"{e}; see {log}")
         if self.xwayland:
-            # sway knows Xwayland's display once it's up, and hands it to
-            # what it runs: ask it to write it down.
-            where = self.scratch / "xwayland-display"
+            # sway sets DISPLAY for what it runs once it has made Xwayland's
+            # display: ask it to write it down, in the runtime dir, so no
+            # path of ours goes into a sway command.
+            where = run / "xwayland-display"
 
             def xdisplay():
-                wl.ipc(got, wl.RUN_COMMAND, f'exec printf %s "$DISPLAY" > {where}')
+                wl.ipc(got, wl.RUN_COMMAND,
+                       'exec printf %s "$DISPLAY" > "$XDG_RUNTIME_DIR/xwayland-display"')
                 return where.exists() and where.read_text().strip()
 
             try:
-                got["DISPLAY"] = wait_for("Xwayland to start", xdisplay, 15, interval=0.2,
-                                          alive=proc)
+                got["DISPLAY"] = wait_for("sway to give Xwayland a display", xdisplay, 15,
+                                          interval=0.2, alive=proc)
             except SessionError as e:
                 raise SessionError(f"{e}; see {log}")
         got.update(XDG_SESSION_TYPE="wayland", GDK_BACKEND="wayland")
