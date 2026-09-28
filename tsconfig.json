@@ -1,0 +1,13 @@
+{
+  "//": "Only to check the declarations, which are hand-written: test/types.ts uses the API the way a consumer would, through the package's own exports map, so a name that moved or a shape that drifted fails here rather than in somebody else's editor.",
+  "compilerOptions": {
+    "strict": true,
+    "noEmit": true,
+    "target": "es2022",
+    "lib": ["es2022", "dom"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "types": ["node"]
+  },
+  "files": ["test/types.ts"]
+}

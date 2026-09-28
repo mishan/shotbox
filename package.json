@@ -20,7 +20,12 @@
   "author": "Misha Nasledov <misha@nasledov.com>",
   "private": true,
   "engines": { "node": ">=18" },
+  "scripts": {
+    "types": "tsc"
+  },
   "devDependencies": {
-    "playwright": "1.63.0"
+    "@types/node": "22.20.4",
+    "playwright": "1.63.0",
+    "typescript": "5.9.3"
   }
 }
