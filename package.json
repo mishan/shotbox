@@ -10,6 +10,7 @@
     "./dress": "./node/dress.mjs",
     "./errors": "./node/errors.mjs",
     "./film": "./node/film.mjs",
+    "./frames": "./node/frames.mjs",
     "./gif": "./node/gif.mjs",
     "./launch": "./node/launch.mjs",
     "./sealed": "./node/sealed.mjs"

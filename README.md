@@ -178,7 +178,7 @@ pieces several projects had copied between them:
 
 ```js
 import { serve, checks, pageErrors, launch, until, gif, sealed,
-         dress, film } from 'shotbox';
+         dress, film, frames, steady } from 'shotbox';
 ```
 
 - `serve(dir, port = 0)`: a static server on localhost that serves ES
@@ -192,8 +192,8 @@ import { serve, checks, pageErrors, launch, until, gif, sealed,
 - `launch(cmd, args)`: a program in its own process group, with `kill()`
   that reaches its children and `why()` that says how it ended and what it
   printed. `until(test, ms)` polls.
-- `gif(webm, out, { width, fps, from, colors, dither })`: a Playwright
-  recording as a GIF, via ffmpeg, with its own palette. `from` cuts that
+- `gif(film, out, { width, fps, from, colors, dither })`: a Playwright
+  recording, or a directory from `frames()`, as a GIF, via ffmpeg, with its own palette. `from` cuts that
   many seconds off the start, `colors` caps the palette, and `dither` is
   ffmpeg's (`none` for flat pages with something moving on them).
 - `sealed({ pass, env })`: an environment for a headless browser that
@@ -212,6 +212,21 @@ import { serve, checks, pageErrors, launch, until, gif, sealed,
   `newPage()`, `start()` when the loop begins, and `end()` closes the
   context and resolves to the video, for `gif(video, out, { from:
   reel.from })`. Playwright writes a frame only when the page repaints.
+
+- `frames(page, { dir, fps, epoch, seed })`: a recording made a frame
+  at a time that comes out the same each run, where `recordVideo` races
+  the page and never does. The page's time stands still and moves a
+  frame's worth between screenshots: timers, `Date`,
+  `requestAnimationFrame`, CSS transitions and animations, and a seeded
+  `Math.random`. Launch Chromium with `args: steady`, and call it before
+  the page's first navigation. `run(ms)` lets page time pass unrecorded,
+  `start()` starts keeping frames, `hold(ms)` stands in for
+  `waitForTimeout` and `move(x, y, ms)` for `mouse.move({ steps })`;
+  other input lands between frames. `end()` says where they are, for
+  `gif(dir, out, { fps })`. Runs match frame for frame, give or take a
+  few pixels one level apart; what is real-time and not a timer (a
+  fetch, a worker, an iframe loading) is not stood still, though a
+  frame that navigates is let load and paint before time moves on.
 
 ```js
 const context = await browser.newContext({ recordVideo: { dir } });

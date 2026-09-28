@@ -10,7 +10,7 @@ export interface GifOptions
     width?: number;
     /** 12. */
     fps?: number;
-    /** Seconds cut off the start. 0. */
+    /** Seconds cut off the start of a video. 0. */
     from?: number;
     /** The palette's size, at most. 256. */
     colors?: number;
@@ -18,5 +18,6 @@ export interface GifOptions
     dither?: string;
 }
 
-/** A recording as a GIF, via ffmpeg; resolves to `out`. */
+/** A recording -- a video, or a directory from `frames()` -- as a GIF,
+ *  via ffmpeg; resolves to `out`. */
 export function gif (film: string, out: string, options?: GifOptions): Promise<string>;
