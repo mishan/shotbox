@@ -1,9 +1,24 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 — 2026-09-27
+
+A session can be a Wayland one, under a headless sway, with Xwayland in
+it for X clients; windows, pictures, waits and input work there as they
+do on X11. A Playwright recording can come out the same each run.
 
 ### Added
 
+- **Wayland sessions.** `--wayland` runs the program under a headless
+  sway, drawing in software, instead of Xvfb, and `--xwayland` adds an
+  Xwayland in it for X clients. Windows are found by title over sway's
+  IPC and taken with grim, and `shoot`, `capture`, `stable` waits, failure
+  pictures, `term --shoot` and the Python API work as they do on X11.
+  `key`, `type`, `click`, `move`, `drag` and `park` speak sway's virtual
+  keyboard and pointer protocols directly, reaching Xwayland's X clients
+  too. See docs/wayland.md.
+- **Windows by app id.** Wherever a window is named, `app=RE` matches its
+  app id rather than its title: a Wayland window's `app_id`, or an X
+  window's `WM_CLASS`, instance or class.
 - **`frames(page)`**, a Playwright recording that comes out the same
   each run: the page's time stands still and moves a frame between
   screenshots, and `steady` is the Chromium flags that keep the frames

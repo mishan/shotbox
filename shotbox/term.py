@@ -110,6 +110,7 @@ def shoot(args):
              "--screen", "x".join(map(str, args.screen))]
     outer += ["--park"] * args.park + ["--desktop"] * args.desktop
     outer += ["--system-bus"] * args.system_bus + ["--keep"] * args.keep
+    outer += ["--wayland"] * args.wayland + ["--xwayland"] * args.xwayland
     for opt, value in (("--failed", args.failed), ("--seed", args.seed)):
         if value:
             outer += [opt, value]

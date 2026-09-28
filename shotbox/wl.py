@@ -1,0 +1,103 @@
+"""Finding windows and taking pictures of them, in a Wayland session under
+sway: what x.py does for X11.
+
+Windows come from sway's IPC socket ($SWAYSOCK), which speaks JSON over a
+Unix socket, and pictures from grim, which speaks wlr-screencopy. Nothing
+to install beyond those two.
+"""
+
+import hashlib
+import json
+import socket
+import struct
+import subprocess
+from pathlib import Path
+
+from .x import CONVERT, QUIET_PNG, matcher
+
+MAGIC = b"i3-ipc"
+RUN_COMMAND, GET_OUTPUTS, GET_TREE, GET_VERSION = 0, 3, 4, 7
+
+
+def ipc(env, kind, payload=""):
+    """Ask sway one thing over its IPC socket; the reply, decoded."""
+    data = payload.encode()
+    with socket.socket(socket.AF_UNIX) as s:
+        s.settimeout(5)
+        s.connect(env["SWAYSOCK"])
+        s.sendall(MAGIC + struct.pack("<II", len(data), kind) + data)
+        head = _read(s, len(MAGIC) + 8)
+        size, _ = struct.unpack("<II", head[len(MAGIC):])
+        return json.loads(_read(s, size))
+
+
+def _read(s, n):
+    buf = b""
+    while len(buf) < n:
+        got = s.recv(n - len(buf))
+        if not got:
+            raise OSError("sway closed its IPC socket")
+        buf += got
+    return buf
+
+
+def windows(env):
+    """Every window, Wayland and X alike: (id, name, width, height, x, y,
+    app ids, visible), x and y absolute. A Wayland window's app id is its
+    app_id; an X one's, under Xwayland, its WM_CLASS instance and class."""
+    found = []
+
+    def walk(node):
+        if node.get("pid") is not None:
+            r = node["rect"]
+            props = node.get("window_properties") or {}
+            apps = tuple(a for a in (node.get("app_id"), props.get("instance"),
+                                     props.get("class")) if a)
+            found.append((node["id"], node.get("name") or "", r["width"], r["height"],
+                          r["x"], r["y"], apps, node.get("visible", False)))
+        for child in node.get("nodes", []) + node.get("floating_nodes", []):
+            walk(child)
+
+    try:
+        tree = ipc(env, GET_TREE)
+    except OSError as e:
+        from .screen import SessionError
+        raise SessionError(f"sway has gone away ({e.strerror or e})")
+    walk(tree)
+    return found
+
+
+def find_window(env, spec):
+    """The biggest visible window `spec` asks for (see x.matcher), or None:
+    the same rule as x.find_window, less the 1x1 helpers, which Wayland
+    doesn't have."""
+    test, _ = matcher(spec)
+    hits = [w[:6] for w in windows(env) if w[7] and test(w[1], w[6])]
+    return max(hits, key=lambda w: w[2] * w[3]) if hits else None
+
+
+def _region(window):
+    return ["-g", f"{window[4]},{window[5]} {window[2]}x{window[3]}"] if window else []
+
+
+def capture(env, out, window=None, crop=None):
+    """Screenshot the whole output, or one window, to `out` (a PNG), then
+    crop it (WxH+X+Y, relative to what was taken). grim takes it and
+    ImageMagick writes it, so the PNG has no timestamps."""
+    shot = subprocess.run(["grim", *_region(window), "-t", "ppm", "-"], env=env,
+                          capture_output=True, check=True).stdout
+    cmd = [*CONVERT, "ppm:-"]
+    if crop:
+        cmd += ["-crop", crop, "+repage"]
+    subprocess.run(cmd + QUIET_PNG + [str(out)], input=shot, check=True)
+    return Path(out)
+
+
+def fingerprint(env, window=None):
+    """A digest of what's on the output, or in one window, or None if it
+    couldn't be taken."""
+    r = subprocess.run(["grim", *_region(window), "-t", "ppm", "-"], env=env,
+                       capture_output=True)
+    if r.returncode or not r.stdout:
+        return None
+    return hashlib.sha256(r.stdout).digest()

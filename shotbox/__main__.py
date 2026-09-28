@@ -48,12 +48,18 @@ def session_options(p):
     g.add_argument("--pass", dest="passthrough", action="append", default=[], metavar="NAME",
                    help="let a variable through from outside (repeatable)")
     g.add_argument("--keep", action="store_true", help="keep the scratch dir, and say where")
+    g.add_argument("--wayland", action="store_true",
+                   help="a Wayland session, under a headless sway, rather than X11 on "
+                        "Xvfb (docs/wayland.md)")
+    g.add_argument("--xwayland", action="store_true",
+                   help="a Wayland session with Xwayland in it too, for X clients")
 
 
 def make_session(a):
     env = dict(e.split("=", 1) for e in a.env)
     return Session(size=a.screen, desktop=a.desktop, system_bus=a.system_bus,
-                   seed=a.seed, keep=a.keep, env=env, passthrough=a.passthrough)
+                   seed=a.seed, keep=a.keep, env=env, passthrough=a.passthrough,
+                   wayland=a.wayland, xwayland=a.xwayland)
 
 
 def self_command():
@@ -104,7 +110,8 @@ def cmd_shoot(argv):
                     "take a screenshot, and stop it.")
     p.add_argument("out", help="the PNG to write")
     p.add_argument("--window", metavar="RE",
-                   help="take this window (its name, a regex matched in full) "
+                   help="take this window (its title, a regex matched in full, "
+                        "or app=RE for its app id) "
                         "instead of the whole display; also waits for it")
     p.add_argument("--crop", metavar="WxH+X+Y",
                    help="then crop to this; without it, to what the program "
@@ -148,7 +155,7 @@ def cmd_shoot(argv):
             if proc.poll() is not None:
                 s.fail(f"the program exited (status {proc.returncode}) "
                        "before the picture was taken")
-            if a.window and not x.find_window(s.env, a.window):
+            if a.window and not s.backend.find_window(s.env, a.window):
                 s.fail(f"the window {a.window!r} went away")
             crop = a.crop
             if not crop and (s.scratch / "crop").exists():
@@ -175,7 +182,8 @@ def cmd_wait(argv):
                                             "screen to stop changing.")
     p.add_argument("kind", choices=("window", "port", "file", "ready", "stable"))
     p.add_argument("arg", nargs="?", default="",
-                   help="the window's name (a regex), the port, the file; for "
+                   help="the window's title (a regex; app=RE for its app id), the "
+                        "port, the file; for "
                         "stable, how long it must hold still (0.5)")
     p.add_argument("--window", metavar="RE",
                    help="for stable: watch this window rather than the display")

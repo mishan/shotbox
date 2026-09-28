@@ -75,6 +75,16 @@ full=$(identify -format %wx%h "$tmp/full.png"); cells=$(identify -format %wx%h "
 set +e; "$sb" term --env A=b -- true 2>/dev/null; st=$?; set -e
 [ $st = 2 ] && ok "term takes session options only with --shoot" || fail "term --env: status $st"
 
+# A window by its app id: WM_CLASS, instance or class.
+"$sb" shoot "$tmp/app1.png" --window app=window.py -- "$here/window.py" t1 >/dev/null
+"$sb" shoot "$tmp/app2.png" --window app=Window.py -- "$here/window.py" t1 >/dev/null
+[ "$(identify -format %wx%h "$tmp/app1.png")" = 200x120 ] && cmp -s "$tmp/app1.png" "$tmp/app2.png" \
+  && ok "a window by its app id" || fail "app="
+set +e; "$sb" shoot "$tmp/app3.png" --window app=nope --timeout 1 -- "$here/window.py" t1 2> "$tmp/err"
+st=$?; set -e
+[ $st != 0 ] && grep -q "window with app id 'nope'" "$tmp/err" && ok "app=: a miss says what it looked for" \
+  || fail "app= miss: $st"
+
 # Stable: waits out a burst of output, and gives up on output that never stops.
 "$sb" run -- sh -c "
   '$sb' term --size 30x5 --log '$tmp/burst.log' -- \
@@ -90,6 +100,20 @@ st=$?; set -e
 [ $st != 0 ] && grep -q "hold still" "$tmp/err" && [ -s "$tmp/busy.png" ] \
   && ok "stable gives up on a busy screen, with a picture of it" || fail "busy: status $st"
 
+# chords LOG [SESSION OPTIONS]: Shift in a chord, into cat in a terminal:
+# the symbol on the key's shifted level, as on a keyboard (A, !, +), and
+# Shift+Tab as the terminal's back-tab, ESC [ Z.
+chords() {
+  log=$1; shift
+  "$sb" run "$@" -- sh -c "
+    '$sb' term --size 40x6 --log '$log' -- sh -c cat & t=\$!
+    '$sb' wait window shotbox-term && '$sb' wait stable --window shotbox-term &&
+    '$sb' click 20 20 --window shotbox-term &&
+    '$sb' key shift+a shift+1 plus shift+Tab Return
+    st=\$?; sleep 0.5; kill \$t 2>/dev/null; exit \$st" \
+    && grep -aq 'A!+' "$log" && grep -aq "$(printf '\033')\[Z" "$log"
+}
+
 # Input: a click for focus, typed text with shifted symbols, and chords.
 "$sb" run -- sh -c "
   '$sb' term --size 40x6 --log '$tmp/input.log' -- sh -c cat & t=\$!
@@ -99,6 +123,8 @@ st=$?; set -e
   st=\$?; sleep 0.5; kill \$t 2>/dev/null; exit \$st" \
   && grep -aq 'Hi, you! 1+1=2 ~/a_b <x>' "$tmp/input.log" \
   && ok "click, type and key reach the program" || fail "input"
+chords "$tmp/chords.log" && ok "shift in a chord: the shifted symbol, and back-tab" \
+  || fail "shift chords"
 set +e; "$sb" key ctrl+comma 2>/dev/null; st=$?; set -e
 [ $st != 0 ] && ok "input needs a session" || fail "key ran outside a session"
 
@@ -107,6 +133,92 @@ set +e; python3 "$here/api.py" "$sb" > "$tmp/api.log" 2>&1; st=$?; set -e
 cat "$tmp/api.log"
 fails=$((fails + $(grep -c '^FAIL' "$tmp/api.log" || true)))
 [ $st = 0 ] || grep -q "^FAIL" "$tmp/api.log" || fail "api.py: status $st"
+
+# Wayland: a headless sway, and Xwayland in it. They need sway, grim and
+# Xwayland, or they skip, unless SHOTBOX_WAYLAND=required.
+win=$here/window.py
+xwayland() { command -v Xwayland >/dev/null; }
+xwayland_skip() {
+  [ "${SHOTBOX_WAYLAND-}" = required ] && fail "$1 skipped: no Xwayland" || echo "skip  $1: no Xwayland"
+}
+xwayland_before=$(pgrep -cx Xwayland || true)
+if command -v sway >/dev/null && command -v grim >/dev/null; then
+  out=$(WAYLAND_DISPLAY=outside DISPLAY=:0 "$sb" run --wayland -- \
+    sh -c 'echo "W=$WAYLAND_DISPLAY D=${DISPLAY-} S=$SWAYSOCK R=$XDG_RUNTIME_DIR"')
+  case $out in
+    "W=wayland-"*" D= S=/tmp/shotbox-"*/run/sway-ipc.*" R=/tmp/shotbox-"*) ok "wayland: a sway of its own, and no X" ;;
+    *) fail "wayland: the environment: $out" ;;
+  esac
+  "$sb" shoot "$tmp/w1.png" --wayland --window wl-test -- "$win" wl-test >/dev/null
+  "$sb" shoot "$tmp/w2.png" --wayland --window wl-test -- "$win" wl-test >/dev/null
+  [ "$(identify -format %wx%h "$tmp/w1.png")" = 200x120 ] && cmp -s "$tmp/w1.png" "$tmp/w2.png" \
+    && ok "wayland: shoot takes the window, the same bytes twice" || fail "wayland: shoot"
+  "$sb" shoot "$tmp/w3.png" --wayland --wait window:wl-test --wait stable -- "$win" wl-test >/dev/null \
+    && [ "$(identify -format %wx%h "$tmp/w3.png")" = 1280x800 ] \
+    && ok "wayland: a stable wait, and the whole output" || fail "wayland: stable"
+  set +e
+  "$sb" shoot "$tmp/w4.png" --wayland --window never --timeout 2 -- "$win" wl-test 2> "$tmp/err"
+  st=$?; set -e
+  [ $st != 0 ] && [ -s "$tmp/w4-failed.png" ] && ok "wayland: a failed wait leaves a picture" \
+    || fail "wayland: no -failed.png ($st)"
+  if xwayland; then
+    "$sb" run --xwayland -- sh -c "[ -n \"\$DISPLAY\" ] && GDK_BACKEND=x11 '$win' wl-x11 &
+      '$sb' wait window wl-x11 && '$sb' capture '$tmp/w5.png' --window wl-x11" \
+      && [ "$(identify -format %wx%h "$tmp/w5.png")" = 200x120 ] \
+      && ok "xwayland: an X client found and taken" || fail "xwayland"
+    "$sb" run --xwayland -- sh -c "GDK_BACKEND=x11 '$win' wl-x11 &
+      '$sb' wait window app=Window.py && '$sb' capture '$tmp/w8.png' --window app=Window.py" \
+      && cmp -s "$tmp/w5.png" "$tmp/w8.png" && ok "xwayland: an X window by its WM_CLASS" \
+      || fail "xwayland: app="
+  else
+    xwayland_skip "xwayland"
+  fi
+  "$sb" shoot "$tmp/w7.png" --wayland --window app=window.py -- "$win" wl-test >/dev/null \
+    && cmp -s "$tmp/w1.png" "$tmp/w7.png" && ok "wayland: a window by its app_id" \
+    || fail "wayland: app="
+  "$sb" term --shoot "$tmp/w6.png" --wayland --size 30x5 --crop 12x3 --when there -- \
+    sh -c 'echo hi; echo there' >/dev/null \
+    && ok "wayland: term --shoot, cropped ($(identify -format %wx%h "$tmp/w6.png"))" \
+    || fail "wayland: term --shoot"
+  # Input: the same as X11's, then a new keyboard for every key, none of
+  # which may lose its first (wtype lost one in a spike; shotbox never
+  # has), then an X client.
+  "$sb" run --wayland -- sh -c "
+    '$sb' term --size 40x6 --log '$tmp/wl-in.log' -- sh -c cat & t=\$!
+    '$sb' wait window shotbox-term && '$sb' wait stable --window shotbox-term &&
+    '$sb' click 20 20 --window shotbox-term &&
+    '$sb' type 'Hi, you! 1+1=2 ~/a_b <x>' && '$sb' key Return ctrl+d
+    st=\$?; sleep 0.5; kill \$t 2>/dev/null; exit \$st" \
+    && grep -aq 'Hi, you! 1+1=2 ~/a_b <x>' "$tmp/wl-in.log" \
+    && ok "wayland: click, type and key reach the program" || fail "wayland: input"
+  chords "$tmp/wl-chords.log" --wayland \
+    && ok "wayland: shift in a chord: the shifted symbol, and back-tab" || fail "wayland: shift chords"
+  "$sb" run --wayland -- sh -c "
+    '$sb' term --size 40x6 --log '$tmp/wl-keys.log' -- sh -c cat & t=\$!
+    '$sb' wait window shotbox-term && '$sb' wait stable --window shotbox-term &&
+    for c in a b c d e f g h i j k l m n o p q r s t; do '$sb' type \$c; done
+    '$sb' key Return; sleep 0.5; kill \$t 2>/dev/null"
+  tr -d '\r' < "$tmp/wl-keys.log" | grep -aqx abcdefghijklmnopqrst \
+    && ok "wayland: twenty keyboards, no first key lost" || fail "wayland: a key went missing"
+  if xwayland; then
+    "$sb" run --xwayland -- sh -c "
+      GDK_BACKEND=x11 '$sb' term --size 40x6 --log '$tmp/xw-in.log' -- sh -c cat & t=\$!
+      '$sb' wait window shotbox-term && '$sb' wait stable --window shotbox-term &&
+      '$sb' click 20 20 --window shotbox-term && '$sb' type 'over X' && '$sb' key Return
+      st=\$?; sleep 0.5; kill \$t 2>/dev/null; exit \$st" \
+      && grep -aq 'over X' "$tmp/xw-in.log" \
+      && ok "xwayland: typing reaches an X client" || fail "xwayland: input"
+  else
+    xwayland_skip "xwayland: input"
+  fi
+  pgrep -f "shotbox-.*/sway.conf" >/dev/null && fail "wayland: sway left running" \
+    || ok "wayland: sway stops with the session"
+  [ "$(pgrep -cx Xwayland || true)" = "$xwayland_before" ] \
+    && ok "xwayland: Xwayland stops with the session" || fail "xwayland: Xwayland left running"
+else
+  [ "${SHOTBOX_WAYLAND-}" = required ] && fail "wayland skipped: no sway or grim" \
+    || echo "skip  wayland: no sway or grim"
+fi
 
 # Compare.
 "$sb" compare "$tmp/a.png" "$tmp/b.png" >/dev/null && ok "compare: the same" || fail "compare same"
