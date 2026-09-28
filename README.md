@@ -223,6 +223,10 @@ await page.keyboard.press('Alt+Enter');
 await gif(await reel.end(), 'demo.gif', { from: reel.from });
 ```
 
+It has TypeScript declarations, written by hand beside each module and
+checked by `npm run types`. `dress`, `film` and `pageErrors` take
+Playwright's `Page`, so they want Playwright's own types installed.
+
 Its `package.json` is at the top of the repository, since npm installs
 from the top of a git repository and nowhere else:
 `"shotbox": "github:mishan/shotbox"` in `devDependencies`, or

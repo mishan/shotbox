@@ -127,6 +127,15 @@ set +e; "$sb" compare "$tmp/a.png" "$tmp/nope.png" 2> "$tmp/err"; st=$?; set -e
 # Node.
 node --test --test-reporter=spec "$here"/node.test.mjs >"$tmp/node.log" 2>&1 && ok "node helpers" \
   || { fail "node helpers"; cat "$tmp/node.log"; }
+# The declarations, which are hand-written, against a file that uses them.
+tsc=$here/../node_modules/.bin/tsc
+if [ -x "$tsc" ]; then
+  (cd "$here/.." && "$tsc") >"$tmp/tsc.log" 2>&1 && ok "the declarations" \
+    || { fail "the declarations"; cat "$tmp/tsc.log"; }
+else
+  echo "skip  the declarations: no TypeScript (npm install)"
+fi
+
 # And the ones that need a browser: Playwright's Chromium, from
 # `npm install && npx playwright install chromium`, or they skip, unless
 # SHOTBOX_BROWSER=required.
