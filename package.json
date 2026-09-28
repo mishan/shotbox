@@ -1,7 +1,7 @@
 {
   "name": "shotbox",
   "version": "0.1.0",
-  "description": "Helpers for reproducible browser screenshots and checks: a static server, a check reporter, page errors, process-group launch, webm to GIF",
+  "description": "Helpers for reproducible browser screenshots and checks: a static server, a check reporter, page errors, process-group launch, webm to GIF, a sealed environment for a browser",
   "type": "module",
   "exports": {
     ".": "./node/index.mjs",
@@ -9,7 +9,8 @@
     "./check": "./node/check.mjs",
     "./errors": "./node/errors.mjs",
     "./gif": "./node/gif.mjs",
-    "./launch": "./node/launch.mjs"
+    "./launch": "./node/launch.mjs",
+    "./sealed": "./node/sealed.mjs"
   },
   "files": ["node"],
   "repository": { "type": "git", "url": "git+https://github.com/mishan/shotbox.git" },

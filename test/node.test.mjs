@@ -13,15 +13,15 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { checks, gif, launch, serve, until } from '../node/index.mjs';
+import { checks, gif, launch, sealed, serve, until } from '../node/index.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 /* A request with the path exactly as written: fetch() tidies away the
    "../" a hostile client would send. */
-const has = (cmd) =>
+const has = (cmd, flag = '-version') =>
 {
-    try { execFileSync(cmd, ['-version'], { stdio: 'ignore' }); return true; }
+    try { execFileSync(cmd, [flag], { stdio: 'ignore' }); return true; }
     catch { return false; }
 };
 
@@ -117,5 +117,78 @@ test('gif cuts the start and keeps to the palette it is given',
     finally
     {
         await fs.rm(dir, { recursive: true, force: true });
+    }
+});
+
+test('sealed keeps what is allowed, and nothing of the caller\'s', async () =>
+{
+    const before = { ...process.env };
+
+    Object.assign(process.env, { DISPLAY: ':0', WAYLAND_DISPLAY: 'wayland-0',
+                                 SSH_AUTH_SOCK: '/nope', SHOTBOX_TEST: 'yes' });
+
+    const seal = await sealed({ pass: ['SHOTBOX_TEST'], env: { A: 'b' } });
+
+    process.env = before;
+
+    try
+    {
+        const { env } = seal;
+
+        for (const k of ['DISPLAY', 'WAYLAND_DISPLAY', 'SSH_AUTH_SOCK'])
+            assert.equal(env[k], undefined, k);
+        assert.equal(env.PATH, process.env.PATH);
+        assert.equal(env.SHOTBOX_TEST, 'yes');
+        assert.equal(env.A, 'b');
+        assert.equal(env.TZ, 'UTC');
+        assert.ok(env.HOME.startsWith(seal.dir + path.sep));
+        assert.ok(env.XDG_CONFIG_HOME.startsWith(env.HOME + path.sep));
+        assert.equal((await fs.stat(env.XDG_RUNTIME_DIR)).mode & 0o777, 0o700);
+    }
+    finally
+    {
+        await seal.close();
+    }
+
+    await assert.rejects(fs.stat(seal.dir));
+});
+
+/* What it is for: a fontconfig alias in the caller's home, which a
+   browser would draw with, is not one in the seal's. The alias is to the
+   monospace font, which is not what an unknown family falls back to. */
+test('sealed leaves the caller\'s fonts behind',
+     { skip: !has('fc-match', '--version') && 'no fontconfig' }, async () =>
+{
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), 'shotbox-test-'));
+    const conf = path.join(home, '.config', 'fontconfig');
+    const seal = await sealed();
+    const match = (family, env = seal.env) => execFileSync(
+        'fc-match', ['-f', '%{family[0]}', family], { env }).toString();
+    const mono = match('monospace');
+
+    try
+    {
+        assert.notEqual(match('ShotboxTest'), mono);
+
+        await fs.mkdir(conf, { recursive: true });
+        await fs.writeFile(path.join(conf, 'fonts.conf'), `<?xml version="1.0"?>
+<fontconfig>
+  <alias binding="strong">
+    <family>ShotboxTest</family>
+    <prefer><family>${mono}</family></prefer>
+  </alias>
+</fontconfig>
+`);
+
+        const theirs = { ...process.env, HOME: home };
+
+        delete theirs.XDG_CONFIG_HOME;
+        assert.equal(match('ShotboxTest', theirs), mono);
+        assert.notEqual(match('ShotboxTest'), mono);
+    }
+    finally
+    {
+        await seal.close();
+        await fs.rm(home, { recursive: true, force: true });
     }
 });
