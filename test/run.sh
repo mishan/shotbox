@@ -133,9 +133,30 @@ if command -v sway >/dev/null && command -v grim >/dev/null && command -v Xwayla
     sh -c 'echo hi; echo there' >/dev/null \
     && ok "wayland: term --shoot, cropped ($(identify -format %wx%h "$tmp/w6.png"))" \
     || fail "wayland: term --shoot"
-  set +e; "$sb" run --wayland -- "$sb" key Return 2> "$tmp/err"; st=$?; set -e
-  [ $st != 0 ] && grep -q "Wayland session yet" "$tmp/err" \
-    && ok "wayland: input says it isn't there yet" || fail "wayland: input: $st"
+  # Input: the same as X11's, then a new keyboard for every key, which is
+  # where a keyboard's first key can go missing, then an X client.
+  "$sb" run --wayland -- sh -c "
+    '$sb' term --size 40x6 --log '$tmp/wl-in.log' -- sh -c cat & t=\$!
+    '$sb' wait window shotbox-term && '$sb' wait stable --window shotbox-term &&
+    '$sb' click 20 20 --window shotbox-term &&
+    '$sb' type 'Hi, you! 1+1=2 ~/a_b <x>' && '$sb' key Return ctrl+d
+    st=\$?; sleep 0.5; kill \$t 2>/dev/null; exit \$st" \
+    && grep -aq 'Hi, you! 1+1=2 ~/a_b <x>' "$tmp/wl-in.log" \
+    && ok "wayland: click, type and key reach the program" || fail "wayland: input"
+  "$sb" run --wayland -- sh -c "
+    '$sb' term --size 40x6 --log '$tmp/wl-keys.log' -- sh -c cat & t=\$!
+    '$sb' wait window shotbox-term && '$sb' wait stable --window shotbox-term &&
+    for c in a b c d e f g h i j k l m n o p q r s t; do '$sb' type \$c; done
+    '$sb' key Return; sleep 0.5; kill \$t 2>/dev/null"
+  tr -d '\r' < "$tmp/wl-keys.log" | grep -aqx abcdefghijklmnopqrst \
+    && ok "wayland: twenty keyboards, no first key lost" || fail "wayland: a key went missing"
+  "$sb" run --xwayland -- sh -c "
+    GDK_BACKEND=x11 '$sb' term --size 40x6 --log '$tmp/xw-in.log' -- sh -c cat & t=\$!
+    '$sb' wait window shotbox-term && '$sb' wait stable --window shotbox-term &&
+    '$sb' click 20 20 --window shotbox-term && '$sb' type 'over X' && '$sb' key Return
+    st=\$?; sleep 0.5; kill \$t 2>/dev/null; exit \$st" \
+    && grep -aq 'over X' "$tmp/xw-in.log" \
+    && ok "xwayland: typing reaches an X client" || fail "xwayland: input"
   pgrep -f "shotbox-.*/sway.conf" >/dev/null && fail "wayland: sway left running" \
     || ok "wayland: sway stops with the session"
 else

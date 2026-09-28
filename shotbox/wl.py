@@ -17,7 +17,7 @@ from pathlib import Path
 from .x import QUIET_PNG
 
 MAGIC = b"i3-ipc"
-RUN_COMMAND, GET_TREE, GET_VERSION = 0, 4, 7
+RUN_COMMAND, GET_OUTPUTS, GET_TREE, GET_VERSION = 0, 3, 4, 7
 
 
 def ipc(env, kind, payload=""):

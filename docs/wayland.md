@@ -45,9 +45,9 @@ session's environment:
   - pictures come from `grim`, run through ImageMagick like the X ones,
     so the PNGs have no timestamps;
   - a `stable` wait's fingerprint is `grim` writing a PPM to a pipe;
-  - input (phase 2) is a small Wayland client of our own for the virtual
-    keyboard and pointer, the way xtest.py is for X: the keymap goes over
-    as text in a memfd, passed with `sendmsg`.
+- **Wayland input** is wlinput.py, a small Wayland client of our own for
+  sway's virtual keyboard and pointer, the way xtest.py is for X: the
+  keymap goes over as text in a memfd, passed with `sendmsg`.
 
 The session, with `--wayland`:
 
@@ -93,14 +93,21 @@ fall back to X.
    along); windows by name; `capture`, `shoot --window/--crop`, `stable`
    waits and failure pictures; the Python API choosing its backend;
    tests that skip without sway, `grim` and Xwayland, and CI that
-   installs them. Input on Wayland says it isn't there yet. *Done.*
+   installs them. *Done.*
 2. **Input.** Keys, text, clicks, moves, drags and `park` over the
    virtual keyboard and pointer protocols, on one connection kept for
-   the session. The spike lost the first key `wtype` sent: it makes a
-   new keyboard, with a new keymap, every time it's run, and the first
-   key can reach the program before the keymap has. One keyboard, made
-   once with every key shotbox can press, should end that; the tests
-   have to type enough to be sure.
+   the session, reaching Xwayland's X clients too. *Done.*
+
+   The spike lost the first key `wtype` sent, so the keyboard is made
+   with one fixed keymap holding every key shotbox can press, each
+   symbol on a key of its own (no Shift, no keymap changes), and a new
+   keyboard presses a key with no symbol first and waits a moment. Over
+   about 150 runs of typing into a GTK 4 entry, cold and under load, the
+   shipped keyboard lost nothing, and nor did one without the blank key
+   or the wait; one variant (the blank key without the wait) lost text
+   twice early on and never again. What wtype hit wasn't pinned down.
+   The tests type through twenty keyboards, one per key, and fail on a
+   missing one.
 3. **The rest.** Matching on app id, and a README section of its own.
 4. **Using it.** neon-doll's `cosmic-shoot.sh` already runs COSMIC's
    compositor nested in a headless sway and takes it with `grim`; it

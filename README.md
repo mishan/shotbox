@@ -95,8 +95,8 @@ keep the scratch dir and say where it is.
 `--wayland` makes the session a Wayland one, under a headless sway drawing
 in software, rather than X11 on Xvfb; `--xwayland` adds an Xwayland in it,
 for X clients the way they run on a Wayland desktop. Windows, pictures,
-waits and `term` work the same; keys and the pointer don't yet. See
-[docs/wayland.md](docs/wayland.md).
+waits, keys, the pointer and `term` work the same, the input over sway's
+virtual keyboard and pointer. See [docs/wayland.md](docs/wayland.md).
 
 **`shotbox term [options] -- COMMAND...`** is a terminal to take pictures of:
 VTE, the engine behind GNOME Terminal, Ptyxis and Tilix, in a plain window

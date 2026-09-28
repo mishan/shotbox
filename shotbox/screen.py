@@ -21,7 +21,7 @@ import os
 import time
 from pathlib import Path
 
-from . import wl, x, xtest
+from . import wl, wlinput, x, xtest
 
 
 class SessionError(RuntimeError):
@@ -146,12 +146,10 @@ class Screen:
 
     @property
     def xt(self):
-        """The XTEST connection, opened on first use and kept."""
-        if self.wayland:
-            raise SessionError("keys and the pointer don't work in a Wayland session "
-                               "yet (docs/wayland.md, phase 2)")
+        """The input connection, opened on first use and kept: XTEST on
+        X11, a virtual keyboard and pointer on Wayland."""
         if self._x is None:
-            self._x = xtest.Display(self.env)
+            self._x = (wlinput if self.wayland else xtest).Display(self.env)
         return self._x
 
     def _at(self, px, py, window):
