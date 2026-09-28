@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 — 2026-09-27
+
+A session can be a Wayland one, under a headless sway, with Xwayland in
+it for X clients; windows, pictures and waits work there as they do on
+X11. A Playwright recording can come out the same each run.
 
 ### Added
 
