@@ -56,7 +56,8 @@ sealed session, waits, takes the picture and stops everything.
   rather than the whole display, and waits for it to appear. `app=RE`
   matches its app id instead: a Wayland window's `app_id`, or an X
   window's `WM_CLASS`, instance or class. Every `--window` and every
-  `window` wait takes either.
+  `window` wait takes either; a title that really does start with `app=`
+  can be written `[a]pp=...`.
 - `--wait window:RE|port:N|file:PATH|ready|stable[:SECS]` waits for more
   (repeatable, in order). `ready` is `$SHOTBOX_SCRATCH/ready` existing;
   `shotbox term` writes it. `stable` is the `--window` (or the whole display)
