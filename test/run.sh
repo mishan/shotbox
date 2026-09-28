@@ -106,8 +106,13 @@ fails=$((fails + $(grep -c '^FAIL' "$tmp/api.log" || true)))
 # Wayland: a headless sway, and Xwayland in it. They need sway, grim and
 # Xwayland, or they skip, unless SHOTBOX_WAYLAND=required.
 win=$here/window.py
-if command -v sway >/dev/null && command -v grim >/dev/null && command -v Xwayland >/dev/null; then
-  out=$(WAYLAND_DISPLAY=wayland-0 DISPLAY=:0 "$sb" run --wayland -- \
+xwayland() { command -v Xwayland >/dev/null; }
+xwayland_skip() {
+  [ "${SHOTBOX_WAYLAND-}" = required ] && fail "$1 skipped: no Xwayland" || echo "skip  $1: no Xwayland"
+}
+xwayland_before=$(pgrep -cx Xwayland || true)
+if command -v sway >/dev/null && command -v grim >/dev/null; then
+  out=$(WAYLAND_DISPLAY=outside DISPLAY=:0 "$sb" run --wayland -- \
     sh -c 'echo "W=$WAYLAND_DISPLAY D=${DISPLAY-} S=$SWAYSOCK R=$XDG_RUNTIME_DIR"')
   case $out in
     "W=wayland-"*" D= S=/tmp/shotbox-"*/run/sway-ipc.*" R=/tmp/shotbox-"*) ok "wayland: a sway of its own, and no X" ;;
@@ -125,10 +130,14 @@ if command -v sway >/dev/null && command -v grim >/dev/null && command -v Xwayla
   st=$?; set -e
   [ $st != 0 ] && [ -s "$tmp/w4-failed.png" ] && ok "wayland: a failed wait leaves a picture" \
     || fail "wayland: no -failed.png ($st)"
-  "$sb" run --xwayland -- sh -c "[ -n \"\$DISPLAY\" ] && GDK_BACKEND=x11 '$win' wl-x11 &
-    '$sb' wait window wl-x11 && '$sb' capture '$tmp/w5.png' --window wl-x11" \
-    && [ "$(identify -format %wx%h "$tmp/w5.png")" = 200x120 ] \
-    && ok "xwayland: an X client found and taken" || fail "xwayland"
+  if xwayland; then
+    "$sb" run --xwayland -- sh -c "[ -n \"\$DISPLAY\" ] && GDK_BACKEND=x11 '$win' wl-x11 &
+      '$sb' wait window wl-x11 && '$sb' capture '$tmp/w5.png' --window wl-x11" \
+      && [ "$(identify -format %wx%h "$tmp/w5.png")" = 200x120 ] \
+      && ok "xwayland: an X client found and taken" || fail "xwayland"
+  else
+    xwayland_skip "xwayland"
+  fi
   "$sb" term --shoot "$tmp/w6.png" --wayland --size 30x5 --crop 12x3 --when there -- \
     sh -c 'echo hi; echo there' >/dev/null \
     && ok "wayland: term --shoot, cropped ($(identify -format %wx%h "$tmp/w6.png"))" \
@@ -138,9 +147,11 @@ if command -v sway >/dev/null && command -v grim >/dev/null && command -v Xwayla
     && ok "wayland: input says it isn't there yet" || fail "wayland: input: $st"
   pgrep -f "shotbox-.*/sway.conf" >/dev/null && fail "wayland: sway left running" \
     || ok "wayland: sway stops with the session"
+  [ "$(pgrep -cx Xwayland || true)" = "$xwayland_before" ] \
+    && ok "xwayland: Xwayland stops with the session" || fail "xwayland: Xwayland left running"
 else
-  [ "${SHOTBOX_WAYLAND-}" = required ] && fail "wayland skipped: no sway, grim or Xwayland" \
-    || echo "skip  wayland: no sway, grim or Xwayland"
+  [ "${SHOTBOX_WAYLAND-}" = required ] && fail "wayland skipped: no sway or grim" \
+    || echo "skip  wayland: no sway or grim"
 fi
 
 # Compare.

@@ -71,7 +71,9 @@ waiting on and taking a picture of one is the same.
 
 Xwayland is asked for rather than always there: it's a second server to
 start and stop, and a session without it can't have a program quietly
-fall back to X.
+fall back to X. Unlike the Xvfb sessions, it has no Xauthority cookie:
+wlroots doesn't give it one, so any local program that finds its socket
+can connect for as long as the session lasts.
 
 ## What differs from X11
 
