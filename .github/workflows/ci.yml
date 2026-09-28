@@ -1,0 +1,39 @@
+# test/run.sh, on every push and pull request. It needs what shotbox
+# needs, and it needs it for real: the session, the terminal and the
+# pictures are checked against an Xvfb, a dbus-daemon and a VTE, not
+# against stand-ins for them. Projects install the Node package from main,
+# so a commit that breaks it breaks their next npm install.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # The README's list, and what the tests use besides: GTK 3 for the
+      # Python API's button, gdbus to ask the bus what it would activate,
+      # ffmpeg for the gif, and a monospace font for the terminal.
+      - name: Install what shotbox runs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            xvfb xauth dbus-daemon imagemagick x11-utils \
+            python3-gi gir1.2-gtk-3.0 gir1.2-vte-2.91 \
+            libglib2.0-bin ffmpeg fonts-dejavu-core
+
+      - run: test/run.sh
