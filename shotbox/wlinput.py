@@ -8,8 +8,10 @@ No Python Wayland binding and no wtype: the standard library, with the
 keymap passed as a file descriptor.
 
 The keyboard is made once per connection, with a keymap holding every key
-shotbox can press, each symbol on a key of its own, so nothing needs Shift
-and the keymap never changes. A program meets a new keyboard's keymap
+shotbox can press, laid out as a US keyboard is: a and A, 1 and !, Tab and
+back-tab on one key, the second with Shift. So a shifted symbol is typed
+with Shift held, and Shift in a chord gives the key's shifted symbol, as
+on X11; and the keymap never changes. A program meets a new keyboard's keymap
 along with its first key, and wtype, which makes a keyboard every time it
 runs, was seen to drop a first key. So a new keyboard first presses a key
 with no symbol, then waits for that to go through and a moment more. In
@@ -21,7 +23,8 @@ import socket
 import struct
 import time
 
-from .xtest import KEYSYMS, MODIFIERS, XError
+from . import wl
+from .xtest import KEYSYMS, MODIFIERS, SHIFT, XError
 
 # Real modifier bits, as the keymap below maps them.
 MOD_BITS = {0xFFE1: 0x01, 0xFFE3: 0x04, 0xFFE9: 0x08, 0xFFE7: 0x08, 0xFFEB: 0x40}
@@ -30,13 +33,19 @@ BUTTONS = {1: 0x110, 2: 0x112, 3: 0x111}
 PRESSED, RELEASED = 1, 0
 KEYMAP_XKB_V1 = 1
 
-# What the keymap holds: a key with no symbol, for the first press; the
-# modifiers; the named keys; and printable ASCII.
-TYPABLE = sorted(set(KEYSYMS.values()) | set(range(0x20, 0x7F)))
+# What the keymap holds, besides a key with no symbol for the first press
+# and the modifiers: printable ASCII, a US keyboard's pairs on two levels,
+# Tab with back-tab (ISO_Left_Tab) above it, and the other named keys.
+PAIRS = ([(ord(c), ord(c.upper())) for c in "abcdefghijklmnopqrstuvwxyz"]
+         + [(ord(a), ord(b)) for a, b in zip("1234567890-=[]\\;',./`",
+                                            '!@#$%^&*()_+{}|:"<>?~')]
+         + [(0x20, None), (0xFF09, 0xFE20)])
+SINGLES = sorted(set(KEYSYMS.values()) - {k for pair in PAIRS for k in pair})
 
 
 def keymap():
-    """The keymap, as XKB text: each symbol on its own keycode, level one."""
+    """The keymap, as XKB text, and where each keysym is: (keycode,
+    shifted)."""
     codes, symbols = [], []
     code = 9
     blank = code
@@ -52,10 +61,13 @@ def keymap():
         mods[sym] = code
         code += 1
     keys = {}
-    for sym in TYPABLE:
+    for low, high in PAIRS + [(sym, None) for sym in SINGLES]:
         codes.append(f"<K{code}> = {code};")
-        symbols.append(f"key <K{code}> {{ [ 0x{sym:x} ] }};")
-        keys[sym] = code
+        levels = f"0x{low:x}" + (f", 0x{high:x}" if high else "")
+        symbols.append(f"key <K{code}> {{ [ {levels} ] }};")
+        keys[low] = (code, False)
+        if high:
+            keys[high] = (code, True)
         code += 1
     text = ("xkb_keymap {\n"
             f'xkb_keycodes "shotbox" {{ minimum = 8; maximum = {code}; '
@@ -74,7 +86,8 @@ def _string(s):
 
 class Display:
     """A connection to the compositor in `env` (XDG_RUNTIME_DIR and
-    WAYLAND_DISPLAY), with a keyboard and a pointer of its own."""
+    WAYLAND_DISPLAY), with a keyboard and a pointer of its own. The screen's
+    size, for the pointer, comes from sway's IPC ($SWAYSOCK)."""
 
     def __init__(self, env=None):
         env = os.environ if env is None else env
@@ -82,11 +95,18 @@ class Display:
         self.sock = socket.socket(socket.AF_UNIX)
         try:
             self.sock.connect(path)
+            self._setup(env)
         except OSError as e:
-            raise XError(f"can't reach the Wayland compositor at {path}: {e.strerror}")
+            self.sock.close()
+            raise XError(f"can't reach the Wayland compositor at {path}: {e.strerror or e}")
+        except BaseException:
+            self.sock.close()
+            raise
+
+    def _setup(self, env):
         self.buf = b""
         self.next_id = 2
-        self.done = set()
+        self.waiting, self.done = set(), set()
         self.globals = {}
         self.registry = self._new()
         self._send(1, 1, struct.pack("<I", self.registry))    # wl_display.get_registry
@@ -160,19 +180,20 @@ class Display:
             interface = body[8:8 + n - 1].decode()
             version, = struct.unpack_from("<I", body, 8 + n + (-n % 4))
             self.globals[interface] = (name, version)
-        elif opcode == 0 and obj >= 2:                         # a wl_callback.done
+        elif opcode == 0 and obj in self.waiting:             # wl_callback.done
+            self.waiting.discard(obj)
             self.done.add(obj)
 
     def sync(self):
         """Wait until the compositor has handled everything sent so far."""
         callback = self._new()
+        self.waiting.add(callback)
         self._send(1, 0, struct.pack("<I", callback))         # wl_display.sync
         while callback not in self.done:
             self._event()
         self.done.discard(callback)
 
     def _size(self, env):
-        from . import wl
         out = wl.ipc(env, wl.GET_OUTPUTS)[0]["rect"]
         return out["width"], out["height"]
 
@@ -190,15 +211,17 @@ class Display:
         self._send(self.keyboard, 2, struct.pack("<IIII", mask, 0, 0, 0))
 
     def press(self, keysym, modifiers=()):
-        """Press and release one key, with the modifier keysyms held."""
+        """Press and release one key, holding the modifier keysyms down, and
+        Shift too if the key's symbol is on its shifted level."""
         if keysym not in self.keys:
             raise XError(f"no key for keysym 0x{keysym:x} in shotbox's keymap")
-        mask = 0
+        code, shifted = self.keys[keysym]
+        mask = MOD_BITS[SHIFT] if shifted else 0
         for m in modifiers:
             mask |= MOD_BITS[m]
         if mask:
             self._mods(mask)
-        self._key(self.keys[keysym])
+        self._key(code)
         if mask:
             self._mods(0)
         self.sync()
@@ -226,6 +249,9 @@ class Display:
         self._send(self.pointer, 4)
 
     def move(self, x, y):
+        # Absolute motion is unsigned: off the screen is its edge, as on X11.
+        x = min(max(x, 0), self.width - 1)
+        y = min(max(y, 0), self.height - 1)
         self._send(self.pointer, 1, struct.pack("<IIIII", self._ms(), x, y,
                                                 self.width, self.height))
         self._frame()

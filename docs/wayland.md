@@ -101,8 +101,11 @@ can connect for as long as the session lasts.
    the session, reaching Xwayland's X clients too. *Done.*
 
    The spike lost the first key `wtype` sent, so the keyboard is made
-   with one fixed keymap holding every key shotbox can press, each
-   symbol on a key of its own (no Shift, no keymap changes), and a new
+   with one fixed keymap holding every key shotbox can press, laid out
+   as a US keyboard is (a and A, 1 and !, Tab and back-tab on one key,
+   so Shift in a chord gives the shifted symbol, as on X11; a first
+   version put each symbol on a key of its own, and `shift+a` typed
+   `a`), and a new
    keyboard presses a key with no symbol first and waits a moment. Over
    about 150 runs of typing into a GTK 4 entry, cold and under load, the
    shipped keyboard lost nothing, and nor did one without the blank key
