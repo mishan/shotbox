@@ -141,12 +141,22 @@ xwayland() { command -v Xwayland >/dev/null; }
 xwayland_skip() {
   [ "${SHOTBOX_WAYLAND-}" = required ] && fail "$1 skipped: no Xwayland" || echo "skip  $1: no Xwayland"
 }
-xwayland_before=$(pgrep -cx Xwayland || true)
+# Their sessions' scratch dirs go under one of ours, so what's left of
+# them can be told from any other sway or Xwayland on the machine.
+wl=$tmp/wl
+mkdir -p "$wl"
+ours_xwayland() {
+  for p in $(pgrep -x Xwayland); do
+    tr '\0' '\n' < "/proc/$p/environ" 2>/dev/null | grep -q "^XDG_RUNTIME_DIR=$wl/" && echo "$p"
+  done
+  true
+}
 if command -v sway >/dev/null && command -v grim >/dev/null; then
+  export TMPDIR=$wl
   out=$(WAYLAND_DISPLAY=outside DISPLAY=:0 "$sb" run --wayland -- \
     sh -c 'echo "W=$WAYLAND_DISPLAY D=${DISPLAY-} S=$SWAYSOCK R=$XDG_RUNTIME_DIR"')
   case $out in
-    "W=wayland-"*" D= S=/tmp/shotbox-"*/run/sway-ipc.*" R=/tmp/shotbox-"*) ok "wayland: a sway of its own, and no X" ;;
+    "W=wayland-"*" D= S=$wl/shotbox-"*/run/sway-ipc.*" R=$wl/shotbox-"*) ok "wayland: a sway of its own, and no X" ;;
     *) fail "wayland: the environment: $out" ;;
   esac
   "$sb" shoot "$tmp/w1.png" --wayland --window wl-test -- "$win" wl-test >/dev/null
@@ -211,10 +221,11 @@ if command -v sway >/dev/null && command -v grim >/dev/null; then
   else
     xwayland_skip "xwayland: input"
   fi
-  pgrep -f "shotbox-.*/sway.conf" >/dev/null && fail "wayland: sway left running" \
+  pgrep -f "$wl/shotbox-.*/sway.conf" >/dev/null && fail "wayland: sway left running" \
     || ok "wayland: sway stops with the session"
-  [ "$(pgrep -cx Xwayland || true)" = "$xwayland_before" ] \
+  [ -z "$(ours_xwayland)" ] \
     && ok "xwayland: Xwayland stops with the session" || fail "xwayland: Xwayland left running"
+  unset TMPDIR
 else
   [ "${SHOTBOX_WAYLAND-}" = required ] && fail "wayland skipped: no sway or grim" \
     || echo "skip  wayland: no sway or grim"

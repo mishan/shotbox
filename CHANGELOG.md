@@ -24,6 +24,13 @@ do on X11. A Playwright recording can come out the same each run.
   screenshots, and `steady` is the Chromium flags that keep the frames
   alike. `gif()` takes the directory of frames it writes.
 
+### Fixed
+
+- **What a program leaves behind stops with the session.** A program
+  that had already exited when the session ended had its process group
+  skipped, so anything it left running in it, a shell script's
+  background child say, outlived the session.
+
 ## 0.2.0 — 2026-09-27
 
 Sessions can be driven, from the command line and from Python, and wait
