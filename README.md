@@ -183,6 +183,9 @@ import { serve, checks, pageErrors, launch, until, gif, sealed,
 
 - `serve(dir, port = 0)`: a static server on localhost that serves ES
   modules with the right type; port 0 picks a free one.
+  `shotbox-serve [DIR] [PORT] [PAGE]` runs it by hand (port 8080) and
+  prints the address of PAGE, for a site whose page isn't at its top:
+  `"demo": "shotbox-serve . 8080 demo/"` in a project's scripts.
 - `checks()`: `check(cond, what)` and `skip(what)` print `ok`, `FAIL` or
   `skip` lines; `done()` prints the tally and returns the exit status.
 - `pageErrors(page)`: every uncaught exception and `console.error`.

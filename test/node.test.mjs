@@ -192,3 +192,31 @@ test('sealed leaves the caller\'s fonts behind',
         await fs.rm(home, { recursive: true, force: true });
     }
 });
+
+test('shotbox-serve, run through a link as npm runs it, says where the page is',
+     async () =>
+{
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'shotbox-test-'));
+    const link = path.join(dir, 'shotbox-serve');
+
+    await fs.mkdir(path.join(dir, 'site', 'demo'), { recursive: true });
+    await fs.writeFile(path.join(dir, 'site', 'demo', 'index.html'), 'here');
+    await fs.symlink(path.join(here, '..', 'node', 'serve.mjs'), link);
+
+    const app = launch(link, [path.join(dir, 'site'), '0', 'demo/']);
+
+    try
+    {
+        assert.ok(await until(() => /\n/.test(app.output), 5000), app.why(5000));
+
+        const url = app.output.trim();
+
+        assert.match(url, /^http:\/\/127\.0\.0\.1:\d+\/demo\/$/);
+        assert.equal(await (await fetch(url)).text(), 'here');
+    }
+    finally
+    {
+        app.kill();
+        await fs.rm(dir, { recursive: true, force: true });
+    }
+});

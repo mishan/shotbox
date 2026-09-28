@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /*
  * Copyright (C) 2026 Misha Nasledov <misha@nasledov.com>
  *
@@ -102,10 +103,17 @@ export function serve (root, port = 0, host = '127.0.0.1')
     });
 }
 
-/* `node serve.mjs [DIR] [PORT]' to look at a directory by hand. */
-if (process.argv[1] === fileURLToPath(import.meta.url))
+/* `shotbox-serve [DIR] [PORT] [PATH]' to look at a directory by hand,
+   saying where: PATH is the page to print the address of, for a
+   directory whose page is not at its top. Compared by real path, since
+   npm runs it through a link in node_modules/.bin, and the link's name
+   is not this file's. */
+if (process.argv[1] &&
+    fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url))
 {
-    const site = await serve(process.argv[2] ?? '.', Number(process.argv[3] ?? 8080));
+    const [dir = '.', port = '8080', page = '/'] = process.argv.slice(2);
+    const site = await serve(dir, Number(port));
 
-    process.stdout.write(`http://127.0.0.1:${site.address().port}/\n`);
+    process.stdout.write(`http://127.0.0.1:${site.address().port}` +
+                         `${page.startsWith('/') ? page : `/${page}`}\n`);
 }
