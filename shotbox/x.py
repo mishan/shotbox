@@ -6,6 +6,7 @@ convert) rather than a Python X binding, so there's nothing to install.
 
 import hashlib
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -49,6 +50,9 @@ def port_open(port, host="127.0.0.1"):
         s.settimeout(0.2)
         return s.connect_ex((host, port)) == 0
 
+
+# ImageMagick 7's name for what 6 calls convert, which 7 warns about.
+CONVERT = ["magick"] if shutil.which("magick") else ["convert"]
 
 # PNGs that come out the same byte for byte: no metadata, no timestamps.
 QUIET_PNG = ["-strip", "-define", "png:exclude-chunks=date,time"]
@@ -116,7 +120,7 @@ class Still:
 
 def montage(images, out, across=True):
     """Put images side by side (or one above another)."""
-    subprocess.run(["convert", *map(str, images), "+append" if across else "-append",
+    subprocess.run([*CONVERT, *map(str, images), "+append" if across else "-append",
                     *QUIET_PNG, str(out)], check=True)
     return Path(out)
 
@@ -137,7 +141,7 @@ def compare(a, b, diff=None, fuzz="0%"):
     # by hand: compare's own AE metric weighs pixels differently from one
     # ImageMagick release to the next.
     out = subprocess.run(
-        ["convert", str(a), str(b), "-alpha", "off", "-compose", "difference",
+        [*CONVERT, str(a), str(b), "-alpha", "off", "-compose", "difference",
          "-composite", "-separate", "-evaluate-sequence", "max",
          "-threshold", fuzz, "-format", "%[fx:round(mean*w*h)]", "info:"],
         capture_output=True, text=True, check=True).stdout
