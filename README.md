@@ -177,7 +177,7 @@ into a session).
 pieces several projects had copied between them:
 
 ```js
-import { serve, checks, pageErrors, launch, until, gif } from 'shotbox';
+import { serve, checks, pageErrors, launch, until, gif, sealed } from 'shotbox';
 ```
 
 - `serve(dir, port = 0)`: a static server on localhost that serves ES
@@ -192,6 +192,13 @@ import { serve, checks, pageErrors, launch, until, gif } from 'shotbox';
   recording as a GIF, via ffmpeg, with its own palette. `from` cuts that
   many seconds off the start, `colors` caps the palette, and `dither` is
   ffmpeg's (`none` for flat pages with something moving on them).
+- `sealed({ pass, env })`: an environment for a headless browser that
+  nothing of yours gets into, as a session's but with no display.
+  Otherwise Chromium's fonts come through your `~/.config/fontconfig` and
+  `~/.local/share/fonts`, and your pictures aren't anybody else's. Give
+  its `env` to `chromium.launch({ env })` and `close()` it afterwards.
+  `pass` (a list of names) and `env` (an object) do what `--pass` and
+  `--env` do.
 
 Its `package.json` is at the top of the repository, since npm installs
 from the top of a git repository and nowhere else:
