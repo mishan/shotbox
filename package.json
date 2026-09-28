@@ -7,7 +7,9 @@
     ".": "./node/index.mjs",
     "./serve": "./node/serve.mjs",
     "./check": "./node/check.mjs",
+    "./dress": "./node/dress.mjs",
     "./errors": "./node/errors.mjs",
+    "./film": "./node/film.mjs",
     "./gif": "./node/gif.mjs",
     "./launch": "./node/launch.mjs",
     "./sealed": "./node/sealed.mjs"
@@ -17,5 +19,8 @@
   "license": "MIT",
   "author": "Misha Nasledov <misha@nasledov.com>",
   "private": true,
-  "engines": { "node": ">=18" }
+  "engines": { "node": ">=18" },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
 }
