@@ -11,13 +11,13 @@
  */
 
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 
-import { dress, film, gif, pageErrors, sealed } from '../node/index.mjs';
+import { dress, film, frames, gif, pageErrors, sealed, steady } from '../node/index.mjs';
 
 let chromium = null, why = false;
 
@@ -44,7 +44,7 @@ before(async () =>
     if (why)
         return;
     seal = await sealed();
-    browser = await chromium.launch({ env: seal.env });
+    browser = await chromium.launch({ env: seal.env, args: steady });
 });
 
 after(async () =>
@@ -253,6 +253,96 @@ test('film says where the loop starts, and gif cuts there',
     finally
     {
         await plain.close();
+        await fs.rm(dir, { recursive: true, force: true });
+    }
+});
+
+/* A page with one of each thing frames() has to stand still: a CSS
+   transition, a timer, Date, and Math.random. */
+const BUSY = `<body style="margin:0">
+<div id=box style="width:20px;height:20px;background:#f00;
+                   transition:transform 1s linear"></div>
+<p id=text></p>
+<script>
+setInterval(() => { text.textContent = Date.now() + ' ' + Math.random(); }, 100);
+</script>
+</body>`;
+
+const record = async (dir) =>
+{
+    const context = await browser.newContext({ viewport: { width: 200, height: 100 } });
+    const page = await context.newPage();
+
+    try
+    {
+        const rec = await frames(page, { fps: 10, dir });
+
+        await page.setContent(BUSY);
+        await rec.run(200);
+        rec.start();
+        await rec.hold(300);
+        await page.evaluate(() => { box.style.transform = 'translateX(150px)'; });
+        await rec.hold(500);
+        await rec.move(100, 50, 300);
+
+        return { ...(await rec.end()),
+                 text: await page.locator('#text').textContent() };
+    }
+    finally
+    {
+        await context.close();
+    }
+};
+
+test('frames: the same frames each run, a frame per step of page time',
+     { skip: why || (!has('ffmpeg') && 'no ffmpeg') }, async () =>
+{
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'shotbox-test-'));
+    const px = (file, y) => execFileSync('convert', [file, '-crop', `200x1+0+${y}`,
+                                                     'txt:-']).toString();
+
+    try
+    {
+        const a = await record(path.join(dir, 'a'));
+        const b = await record(path.join(dir, 'b'));
+
+        /* 300 + 500 + 300 ms at 10 fps; Date is the epoch and 1.3s. */
+        assert.equal(a.count, 11);
+        assert.equal(b.count, 11);
+        assert.equal(a.text, b.text);
+        assert.match(a.text, /^1767225601300 /);
+
+        for (let i = 0; i < a.count; i++)
+        {
+            const name = `${String(i).padStart(5, '0')}.png`;
+            /* compare says how many on stderr, and exits 1 for any. */
+            const diff = spawnSync('compare', [
+                '-metric', 'AE', '-fuzz', '1%',
+                path.join(a.dir, name), path.join(b.dir, name), 'null:',
+            ]).stderr.toString();
+
+            assert.equal(Number(diff.split(' ')[0]), 0, `${name}: ${diff}`);
+        }
+
+        /* The transition runs on page time: 150px a second is 15 a frame. */
+        const left = (i) =>
+        {
+            const row = px(path.join(a.dir, `${String(i).padStart(5, '0')}.png`), 10);
+            const red = row.split('\n').filter((l) => /#FF0000/i.test(l));
+
+            return Number(red[0]?.split(',')[0]);
+        };
+
+        assert.equal(left(6) - left(4), 30);
+
+        /* And the gif has a frame for each, no more, no fewer. */
+        const out = await gif(a.dir, path.join(dir, 'a.gif'), { fps: 10, width: 200 });
+
+        assert.equal(execFileSync('identify', [out]).toString().trim()
+                         .split('\n').length, 11);
+    }
+    finally
+    {
         await fs.rm(dir, { recursive: true, force: true });
     }
 });

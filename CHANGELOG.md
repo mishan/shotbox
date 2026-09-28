@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`frames(page)`**, a Playwright recording that comes out the same
+  each run: the page's time stands still and moves a frame between
+  screenshots, and `steady` is the Chromium flags that keep the frames
+  alike. `gif()` takes the directory of frames it writes.
+
 ## 0.2.0 — 2026-09-27
 
 Sessions can be driven, from the command line and from Python, and wait

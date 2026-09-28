@@ -8,6 +8,7 @@
  * gif.mjs -- a recording (Playwright's recordVideo webm) as a GIF.
  *
  *     await gif(await page.video().path(), 'demo/demo.gif', { width: 1280 });
+ *     await gif(framesDir, 'demo/demo.gif', { fps: 8 });   // from frames()
  *
  * Through a palette of its own: the default 216 colors turn a page of
  * flat grays into bands. Needs ffmpeg.
@@ -19,6 +20,10 @@
  * with something animating on it can want few colors and no dither, since
  * a dither pattern over a moving region is noise the gif pays for every
  * frame.
+ *
+ * A directory is frames() output, 00000.png on, taken at `fps': each is
+ * a frame of the gif, so nothing is dropped or doubled, and `from' does
+ * not apply.
  */
 
 import { spawn } from 'node:child_process';
@@ -47,7 +52,9 @@ export async function gif (film, out, { width = 1280, fps = 12, from = 0,
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'shotbox-gif-'));
     const palette = path.join(dir, 'palette.png');
     const filters = `fps=${fps},scale=${width}:-1:flags=lanczos`;
-    const input = ['-ss', String(from), '-i', film];
+    const input = (await fs.stat(film)).isDirectory()
+        ? ['-framerate', String(fps), '-i', path.join(film, '%05d.png')]
+        : ['-ss', String(from), '-i', film];
 
     try
     {
