@@ -16,7 +16,6 @@ do on X11. A Playwright recording can come out the same each run.
   `key`, `type`, `click`, `move`, `drag` and `park` speak sway's virtual
   keyboard and pointer protocols directly, reaching Xwayland's X clients
   too. See docs/wayland.md.
-
 - **`frames(page)`**, a Playwright recording that comes out the same
   each run: the page's time stands still and moves a frame between
   screenshots, and `steady` is the Chromium flags that keep the frames

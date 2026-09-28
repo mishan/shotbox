@@ -55,7 +55,12 @@ def windows(env):
         for child in node.get("nodes", []) + node.get("floating_nodes", []):
             walk(child)
 
-    walk(ipc(env, GET_TREE))
+    try:
+        tree = ipc(env, GET_TREE)
+    except OSError as e:
+        from .screen import SessionError
+        raise SessionError(f"sway has gone away ({e.strerror or e})")
+    walk(tree)
     return found
 
 
