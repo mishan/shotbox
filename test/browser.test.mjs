@@ -115,6 +115,53 @@ test('dress captions fade on their own, and remove takes it all out',
     }
 });
 
+test('dress is one set however often it is asked, and none in an iframe',
+     { skip: why }, async () =>
+{
+    const page = await browser.newPage();
+    const count = () => page.locator('[data-shotbox]').count();
+
+    try
+    {
+        await page.goto(PAGE);
+        await dress(page);
+
+        const dressing = await dress(page);
+
+        assert.equal(await count(), 2);
+        await page.reload();
+        assert.equal(await count(), 2);
+
+        /* Out means out, and asked again, back. */
+        await dressing.remove();
+        assert.equal(await count(), 0);
+
+        const again = await dress(page);
+
+        assert.equal(await count(), 2);
+        await again.caption('back');
+        assert.equal(await page.locator('[data-shotbox=caption]').textContent(),
+                     'back');
+
+        /* An iframe loaded after, which the init script also runs in. */
+        await page.evaluate(() => new Promise((ok) =>
+        {
+            const frame = document.createElement('iframe');
+
+            frame.srcdoc = '<body>inside</body>';
+            frame.onload = ok;
+            document.body.append(frame);
+        }));
+        assert.equal(await page.frames()[1].locator('[data-shotbox]').count(), 0);
+        await again.remove();
+        assert.equal(await count(), 0);
+    }
+    finally
+    {
+        await page.close();
+    }
+});
+
 test('pageErrors hears both a throw and a console.error', { skip: why }, async () =>
 {
     const page = await browser.newPage();
@@ -153,7 +200,9 @@ test('film says where the loop starts, and gif cuts there',
             recordVideo: { dir, size: { width: 160, height: 120 } },
         });
         const page = await context.newPage();
+        const t0 = performance.now();
         const reel = film(page);
+        const t1 = performance.now();
 
         /* Red for the part to cut, blue from the start of the loop. And
            something moving in the corner: Playwright writes a frame only
@@ -171,10 +220,18 @@ test('film says where the loop starts, and gif cuts there',
         await page.waitForTimeout(1500);
         await page.evaluate(() => { document.body.style.background = '#0000ff'; });
         await page.waitForTimeout(100);
+        const t2 = performance.now();
+
         reel.start();
+
+        const t3 = performance.now();
+
         await page.waitForTimeout(1500);
 
-        assert.ok(reel.from > 1.4, `from ${reel.from}`);
+        /* Seconds from film() to start(), not milliseconds, and not from
+           anything else. */
+        assert.ok(reel.from >= (t2 - t1) / 1000 && reel.from <= (t3 - t0) / 1000,
+                  `from ${reel.from}`);
 
         const video = await reel.end();
         const first = async (name, from) =>

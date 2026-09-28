@@ -125,12 +125,12 @@ set +e; "$sb" compare "$tmp/a.png" "$tmp/nope.png" 2> "$tmp/err"; st=$?; set -e
   || fail "compare missing: $st $(cat "$tmp/err")"
 
 # Node.
-node --test "$here"/node.test.mjs >"$tmp/node.log" 2>&1 && ok "node helpers" \
+node --test --test-reporter=spec "$here"/node.test.mjs >"$tmp/node.log" 2>&1 && ok "node helpers" \
   || { fail "node helpers"; cat "$tmp/node.log"; }
 # And the ones that need a browser: Playwright's Chromium, from
 # `npm install && npx playwright install chromium`, or they skip, unless
 # SHOTBOX_BROWSER=required.
-node --test "$here"/browser.test.mjs >"$tmp/browser.log" 2>&1 || {
+node --test --test-reporter=spec "$here"/browser.test.mjs >"$tmp/browser.log" 2>&1 || {
   fail "browser helpers"; cat "$tmp/browser.log"; }
 if grep -q '^ℹ skipped [1-9]' "$tmp/browser.log"; then
   # CI says it has to run, so there a skip is a failure.

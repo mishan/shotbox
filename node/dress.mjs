@@ -22,18 +22,30 @@
  * Both are nodes in the page, marked `data-shotbox', above everything and
  * taking no events. They come back after a navigation or a reload, once
  * the new page has a body: a node appended to <html> while the parser is
- * still on its way to <body> does not survive the trip.
+ * still on its way to <body> does not survive the trip. Only in the top
+ * frame: an iframe has a mouse of its own, and a second dot there would
+ * be one that remove() never reached.
+ *
+ * There is one set however many times it is called, and after remove()
+ * it can be called again.
  */
 
 /* In the page: its own function, so it is sent as source and not as a
    closure over anything here. */
 const DRESS = (hold) =>
 {
-    if (window.__shotbox)
+    if (window.top !== window)
         return;
 
+    /* Asked again before the body came, each asking waits for it; the
+       first one there puts them in. */
     const put = () =>
     {
+        if (window.__shotbox)
+            return;
+
+        const stop = new AbortController();
+        const on = { capture: true, signal: stop.signal };
         const dot = document.createElement('div');
         const cap = document.createElement('div');
 
@@ -65,11 +77,11 @@ const DRESS = (hold) =>
         {
             dot.style.left = `${e.clientX}px`;
             dot.style.top = `${e.clientY}px`;
-        }, true);
+        }, on);
         addEventListener('mousedown',
-                         () => { dot.style.transform = 'scale(0.6)'; }, true);
+                         () => { dot.style.transform = 'scale(0.6)'; }, on);
         addEventListener('mouseup',
-                         () => { dot.style.transform = 'scale(1)'; }, true);
+                         () => { dot.style.transform = 'scale(1)'; }, on);
 
         let fading = 0;
 
@@ -83,8 +95,11 @@ const DRESS = (hold) =>
             },
             remove ()
             {
+                stop.abort();
+                clearTimeout(fading);
                 dot.remove();
                 cap.remove();
+                delete window.__shotbox;
             },
         };
     };
@@ -106,7 +121,8 @@ export async function dress (page, { hold = 1300 } = {})
                                          text),
 
         /* Out of this page, for a still of the page and not of the
-           recording. A navigation after this brings them back. */
+           recording. A navigation after this brings them back, and so
+           does dress() again. */
         remove: () => page.evaluate(() => window.__shotbox?.remove()),
     };
 }
