@@ -35,7 +35,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             xvfb xauth dbus-daemon imagemagick x11-utils \
             python3-gi gir1.2-gtk-3.0 gir1.2-vte-2.91 \
-            libglib2.0-bin ffmpeg fonts-dejavu-core
+            libglib2.0-bin ffmpeg fonts-dejavu-core \
+            sway grim xwayland
 
       # Playwright, for the helpers that need a browser. The tests skip
       # rather than fail without it, so CI is where they have to run.
@@ -45,3 +46,4 @@ jobs:
       - run: test/run.sh
         env:
           SHOTBOX_BROWSER: required
+          SHOTBOX_WAYLAND: required

@@ -44,7 +44,9 @@ sudo apt install xvfb xauth dbus-daemon imagemagick x11-utils gir1.2-vte-2.91
 ln -s "$PWD/bin/shotbox" ~/.local/bin/shotbox
 ```
 
-No Python packages: it's the standard library and those tools.
+No Python packages: it's the standard library and those tools. For
+Wayland sessions, `sway` and `grim`, and `Xwayland` for X clients in them:
+`sudo apt install sway grim xwayland`.
 
 ## Commands
 
@@ -89,6 +91,12 @@ home as a copy of a directory (a config, a profile, sample files);
 `--desktop` for real GSettings and the system's D-Bus services, which a
 desktop shell needs; `--system-bus` for a stand-in system bus; `--keep` to
 keep the scratch dir and say where it is.
+
+`--wayland` makes the session a Wayland one, under a headless sway drawing
+in software, rather than X11 on Xvfb; `--xwayland` adds an Xwayland in it,
+for X clients the way they run on a Wayland desktop. Windows, pictures,
+waits and `term` work the same; keys and the pointer don't yet. See
+[docs/wayland.md](docs/wayland.md).
 
 **`shotbox term [options] -- COMMAND...`** is a terminal to take pictures of:
 VTE, the engine behind GNOME Terminal, Ptyxis and Tilix, in a plain window
@@ -256,7 +264,8 @@ from the top of a git repository and nowhere else:
 API (`test/api.py`, which needs GTK 3's PyGObject) and the Node helpers, and
 takes a few seconds. The helpers that need a browser use Playwright's
 Chromium (`npm install && npx playwright install chromium`) and skip
-without it.
+without it, and the Wayland sessions need sway, grim and Xwayland and skip
+without them.
 
 ## License
 

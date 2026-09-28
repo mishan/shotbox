@@ -4,6 +4,13 @@
 
 ### Added
 
+- **Wayland sessions.** `--wayland` runs the program under a headless
+  sway, drawing in software, instead of Xvfb, and `--xwayland` adds an
+  Xwayland in it for X clients. Windows are found by title over sway's
+  IPC and taken with grim, and `shoot`, `capture`, `stable` waits, failure
+  pictures, `term --shoot` and the Python API work as they do on X11.
+  Keys and the pointer don't yet. See docs/wayland.md.
+
 - **`frames(page)`**, a Playwright recording that comes out the same
   each run: the page's time stands still and moves a frame between
   screenshots, and `steady` is the Chromium flags that keep the frames

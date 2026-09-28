@@ -1,4 +1,4 @@
-"""A sealed session: a private X display, a private D-Bus, a scratch home.
+"""A sealed session: a private display, a private D-Bus, a scratch home.
 
 Everything a screenshot needs to be reproducible and harmless. Nothing run
 inside can reach your desktop: DISPLAY, WAYLAND_DISPLAY and the session bus
@@ -19,6 +19,9 @@ The pieces, and why each one:
 
 - Xvfb on a display number of our own, with an Xauthority cookie, started
   with -displayfd so we know it's listening instead of guessing with sleep.
+- Or, with wayland=True, a headless sway, drawing in software, its sockets
+  in the session's own XDG_RUNTIME_DIR, and with xwayland=True an Xwayland
+  in it for X clients. See docs/wayland.md.
 - dbus-daemon with a config of our own. By default its service directory is
   empty, so nothing gets activated on it behind your back (gvfs, dconf, the
   portals); desktop=True uses the system's service directories instead, for
@@ -36,6 +39,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from . import wl
 from .screen import Screen, SessionError, wait_for  # noqa: F401 (wait_for, for callers)
 
 # Passed through from the caller unless told otherwise. Everything else is
@@ -71,6 +75,18 @@ BUS_CONFIG = """<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Config
     <allow own="*"/>
   </policy>
 </busconfig>
+"""
+
+
+# sway, headless: one output the size of the screen, no borders or gaps,
+# and every window floating at 0,0 at the size it asks for, the way an X
+# client comes up on Xvfb with no window manager.
+SWAY_CONFIG = """output * resolution {width}x{height} position 0 0
+default_border none
+default_floating_border none
+focus_follows_mouse no
+for_window [all] floating enable, move position 0 0
+xwayland {xwayland}
 """
 
 
@@ -120,8 +136,11 @@ class Session(Screen):
     it once it's entered. `failed`, as for a Screen."""
 
     def __init__(self, size=(1280, 800), desktop=False, system_bus=False,
-                 seed=None, keep=False, env=None, passthrough=(), failed=None):
+                 seed=None, keep=False, env=None, passthrough=(), failed=None,
+                 wayland=False, xwayland=False):
         self.size = size
+        self.xwayland = xwayland
+        self.use_wayland = wayland or xwayland
         self.desktop = desktop
         self.system_bus = system_bus
         self.seed = seed
@@ -137,14 +156,21 @@ class Session(Screen):
     # --- setup ----------------------------------------------------------------
 
     def __enter__(self):
-        need("Xvfb", "xauth", "dbus-daemon")
+        if self.use_wayland:
+            need("sway", "grim", "dbus-daemon", *(["Xwayland"] if self.xwayland else []))
+        else:
+            need("Xvfb", "xauth", "dbus-daemon")
         self.scratch = Path(tempfile.mkdtemp(prefix="shotbox-"))
         try:
             self._make_home()
-            display, xauth = self._start_x()
             bus = self._start_bus("session")
             sysbus = self._start_bus("system") if self.system_bus else None
-            self.env = self._make_env(display, xauth, bus, sysbus)
+            if self.use_wayland:
+                graphics = self._start_sway(bus)
+            else:
+                display, xauth = self._start_x()
+                graphics = {"DISPLAY": display, "XAUTHORITY": str(xauth)}
+            self.env = self._make_env(graphics, bus, sysbus)
         except BaseException:
             self.__exit__(None, None, None)
             raise
@@ -197,6 +223,63 @@ class Session(Screen):
             proc.wait()
         raise SessionError("Xvfb didn't start; see " + str(self.scratch / "Xvfb.log"))
 
+    def _start_sway(self, bus):
+        """Start sway, headless, and wait until it answers; the variables
+        that point a program at it."""
+        run = self.scratch / "run"
+        conf = self.scratch / "sway.conf"
+        conf.write_text(SWAY_CONFIG.format(width=self.size[0], height=self.size[1],
+                                           xwayland="force" if self.xwayland else "disable"))
+        home = self.scratch / "home"
+        env = {k: os.environ[k] for k in ("PATH",) if k in os.environ}
+        env.update(HOME=str(home), XDG_RUNTIME_DIR=str(run),
+                   XDG_CONFIG_HOME=str(home / ".config"), DBUS_SESSION_BUS_ADDRESS=bus,
+                   LANG="C.UTF-8", TZ="UTC",
+                   # No GPU, no seat, no input devices: an output in memory,
+                   # drawn in software, the same pixels every run.
+                   WLR_BACKENDS="headless", WLR_RENDERER="pixman",
+                   WLR_LIBINPUT_NO_DEVICES="1", WLR_HEADLESS_OUTPUTS="1")
+        log = self.scratch / "sway.log"
+        proc = subprocess.Popen(["sway", "-c", str(conf)], env=env,
+                                stdout=subprocess.DEVNULL, stderr=open(log, "wb"),
+                                start_new_session=True)
+        self._procs.append(proc)
+
+        # sway has nothing like Xvfb's -displayfd: its sockets appear in
+        # our runtime dir, then it answers on the IPC one.
+        def answering():
+            socks = sorted(run.glob("sway-ipc.*.sock"))
+            ways = sorted(p for p in run.glob("wayland-*") if not p.name.endswith(".lock"))
+            if not socks or not ways:
+                return None
+            got = {"SWAYSOCK": str(socks[0]), "WAYLAND_DISPLAY": ways[0].name}
+            try:
+                wl.ipc(got, wl.GET_VERSION)
+            except OSError:
+                return None
+            return got
+
+        try:
+            got = wait_for("sway to start", answering, 15, alive=proc)
+        except SessionError as e:
+            raise SessionError(f"{e}; see {log}")
+        if self.xwayland:
+            # sway knows Xwayland's display once it's up, and hands it to
+            # what it runs: ask it to write it down.
+            where = self.scratch / "xwayland-display"
+
+            def xdisplay():
+                wl.ipc(got, wl.RUN_COMMAND, f'exec printf %s "$DISPLAY" > {where}')
+                return where.exists() and where.read_text().strip()
+
+            try:
+                got["DISPLAY"] = wait_for("Xwayland to start", xdisplay, 15, interval=0.2,
+                                          alive=proc)
+            except SessionError as e:
+                raise SessionError(f"{e}; see {log}")
+        got.update(XDG_SESSION_TYPE="wayland", GDK_BACKEND="wayland")
+        return got
+
     def _start_bus(self, kind):
         services = self.scratch / f"{kind}-services"
         services.mkdir()
@@ -218,7 +301,7 @@ class Session(Screen):
             raise SessionError(f"dbus-daemon ({kind}) didn't start")
         return address
 
-    def _make_env(self, display, xauth, bus, sysbus):
+    def _make_env(self, graphics, bus, sysbus):
         home = self.scratch / "home"
         env = {k: os.environ[k] for k in self.passthrough if k in os.environ}
         env.update(SEALED_ENV)
@@ -231,12 +314,11 @@ class Session(Screen):
             XDG_STATE_HOME=str(home / ".local/state"),
             XDG_CACHE_HOME=str(home / ".cache"),
             XDG_RUNTIME_DIR=str(self.scratch / "run"),
-            DISPLAY=display,
-            XAUTHORITY=str(xauth),
             DBUS_SESSION_BUS_ADDRESS=bus,
             SHOTBOX="1",
             SHOTBOX_SCRATCH=str(self.scratch),
         )
+        env.update(graphics)
         if sysbus:
             env["DBUS_SYSTEM_BUS_ADDRESS"] = sysbus
         env.update(self.extra_env)

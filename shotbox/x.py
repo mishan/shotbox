@@ -8,6 +8,7 @@ import hashlib
 import re
 import socket
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -65,11 +66,12 @@ def capture(env, out, window=None, crop=None):
     return Path(out)
 
 
-def try_capture(env, out):
+def try_capture(env, out, backend=None):
     """Screenshot the whole display for a look at what went wrong: the path,
-    or None if there was no display left to take."""
+    or None if there was no display left to take. `backend` is the module
+    that takes it: this one, or wl for a Wayland session."""
     try:
-        return capture(env, out)
+        return (backend or sys.modules[__name__]).capture(env, out)
     except (OSError, subprocess.CalledProcessError):
         return None
 
@@ -89,21 +91,22 @@ class Still:
     """A test for wait_for: true once the display (or the window named
     `name`) has looked the same for `quiet` seconds. For the paint after a
     click, a panel sliding in, a toast going away: anything that has no
-    other sign it's done."""
+    other sign it's done. `backend`, as for try_capture."""
 
-    def __init__(self, env, name=None, quiet=0.5):
+    def __init__(self, env, name=None, quiet=0.5, backend=None):
         self.env, self.name, self.quiet = env, name, quiet
+        self.backend = backend or sys.modules[__name__]
         self.last, self.since = None, 0.0
 
     def __call__(self):
         window = None
         if self.name:
-            window = find_window(self.env, self.name)
+            window = self.backend.find_window(self.env, self.name)
             if not window:
                 self.last = None
                 return False
         # The window's place and size too: one that moves hasn't settled.
-        now = (window[2:] if window else None, fingerprint(self.env, window))
+        now = (window[2:] if window else None, self.backend.fingerprint(self.env, window))
         t = time.monotonic()
         if now[1] is None or now != self.last:
             self.last, self.since = now, t
