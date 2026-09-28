@@ -1,0 +1,61 @@
+# Publish a release: pushing a tag vX.Y.Z runs ci.yml first, then publishes
+# the Python package to PyPI and the Node package to npm, each only if the
+# tag is its version. Both publish over GitHub's OIDC, trusted publishing,
+# with no token kept here once npm's is set up. docs/releasing.md has the
+# one-time setup and the steps for a release.
+
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
+
+  pypi:
+    needs: test
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: The tag is the version
+        run: |
+          v=$(python3 -c "import shotbox; print(shotbox.__version__)")
+          [ "${GITHUB_REF_NAME#v}" = "$v" ] || { echo "tag $GITHUB_REF_NAME, version $v"; exit 1; }
+      - name: Build
+        run: |
+          python3 -m venv /tmp/build
+          /tmp/build/bin/pip install -q build
+          /tmp/build/bin/python -m build --outdir dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  npm:
+    needs: test
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      # npm 11.5 or later, for trusted publishing.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: The tag is the version
+        run: |
+          v=$(node -p "require('./package.json').version")
+          [ "${GITHUB_REF_NAME#v}" = "$v" ] || { echo "tag $GITHUB_REF_NAME, version $v"; exit 1; }
+      - run: npm ci
+      # NPM_TOKEN only until npm's trusted publishing is set up: npm sets
+      # that up on a package that exists, so the first release needs one.
+      - run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

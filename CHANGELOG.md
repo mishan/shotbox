@@ -8,6 +8,10 @@ do on X11. A Playwright recording can come out the same each run.
 
 ### Added
 
+- **Published.** `pipx install --system-site-packages shotbox` (or `pip
+  install shotbox`) for the command and the Python API, from PyPI, and
+  `npm install shotbox` for the Node helpers. A tag publishes both, from
+  CI; see docs/releasing.md.
 - **Wayland sessions.** `--wayland` runs the program under a headless
   sway, drawing in software, instead of Xvfb, and `--xwayland` adds an
   Xwayland in it for X clients. Windows are found by title over sway's
