@@ -1,6 +1,6 @@
 {
   "name": "shotbox",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Helpers for reproducible browser screenshots and checks: a static server, a check reporter, page errors, process-group launch, webm to GIF, a sealed environment for a browser",
   "type": "module",
   "exports": {
