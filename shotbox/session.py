@@ -34,6 +34,7 @@ import shutil
 import signal
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 from .screen import Screen, SessionError, wait_for  # noqa: F401 (wait_for, for callers)
@@ -97,22 +98,42 @@ def free_display(skip=()):
     raise SessionError("no free X display number")
 
 
-def kill_group(proc, grace=2.0):
-    """TERM the process's group, then KILL it if it hasn't gone."""
-    if proc is None or proc.poll() is not None:
-        return
-    try:
-        os.killpg(proc.pid, signal.SIGTERM)
-    except ProcessLookupError:
-        return
-    try:
-        proc.wait(grace)
-    except subprocess.TimeoutExpired:
+def group_alive(pgid):
+    """Whether anything in the process group is still running. Zombies
+    don't count: where nothing reaps orphans (a container whose first
+    process is ours), they stay in the group without being alive."""
+    for stat in Path("/proc").glob("[0-9]*/stat"):
         try:
-            os.killpg(proc.pid, signal.SIGKILL)
+            # pid (comm) state ppid pgrp ...; comm can hold spaces and parens.
+            state, _, pgrp = stat.read_text().rsplit(")", 1)[1].split()[:3]
+        except (OSError, IndexError):
+            continue
+        if int(pgrp) == pgid and state != "Z":
+            return True
+    return False
+
+
+def kill_group(proc, grace=2.0):
+    """TERM the process's group, then KILL what's left of it. The group,
+    whether or not the process itself is still there: a program that has
+    exited can leave children running in it."""
+    if proc is None:
+        return
+    pgid = proc.pid
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(pgid, sig)
         except ProcessLookupError:
-            pass
-        proc.wait()
+            break
+        end = time.monotonic() + grace
+        while True:
+            proc.poll()   # reaps the process itself, once it's gone
+            if not group_alive(pgid) or time.monotonic() > end:
+                break
+            time.sleep(0.05)
+        if not group_alive(pgid):
+            break
+    proc.wait()
 
 
 class Session(Screen):

@@ -23,6 +23,11 @@ scratch=$("$sb" run -- sh -c 'echo $SHOTBOX_SCRATCH')
 [ ! -e "$scratch" ] && ok "the scratch dir is removed" || fail "left $scratch behind"
 set +e; "$sb" run -- sh -c 'exit 7'; st=$?; set -e
 [ $st = 7 ] && ok "run exits with the command's status" || fail "run exited $st"
+# A program that's gone, leaving a child behind: the child goes too.
+"$sb" run -- sh -c "sleep 300 & echo \$! > '$tmp/orphan'"
+pid=$(cat "$tmp/orphan")
+kill -0 "$pid" 2>/dev/null && { fail "a child left behind outlived the session"; kill "$pid"; } \
+  || ok "what a program leaves behind stops with the session"
 names=$("$sb" run -- gdbus call --session --dest org.freedesktop.DBus \
   --object-path / --method org.freedesktop.DBus.ListActivatableNames)
 [ "$names" = "(['org.freedesktop.DBus'],)" ] && ok "nothing activatable on the bus" \
