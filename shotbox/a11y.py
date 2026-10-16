@@ -211,6 +211,18 @@ def place(Atspi, n, shown, origins):
     return [o[1][0] + e.x, o[1][1] + e.y, e.width, e.height]
 
 
+def labelled(Atspi, acc):
+    """The name of what labels `acc` (its LABELLED_BY relation), or ''. GTK 3
+    has a mnemonic label say it so, and its entry has no name of its own."""
+    for rel in acc.get_relation_set() or []:
+        if rel.get_relation_type() == Atspi.RelationType.LABELLED_BY:
+            for i in range(rel.get_n_targets()):
+                target = rel.get_target(i)
+                if target is not None and target.get_name():
+                    return target.get_name()
+    return ""
+
+
 def node(Atspi, acc, states, path):
     shown = [s for s in STATES
              if states.contains(getattr(Atspi.StateType, s.upper().replace("-", "_")))]
@@ -219,7 +231,8 @@ def node(Atspi, acc, states, path):
         shown.append("collapsed")
     if not states.contains(Atspi.StateType.SENSITIVE):
         shown.append("disabled")
-    return Node(role=acc.get_role_name(), name=acc.get_name() or "",
+    return Node(role=acc.get_role_name(),
+                name=acc.get_name() or labelled(Atspi, acc),
                 description=acc.get_description() or "", states=shown, path=path,
                 _role=int(acc.get_role()),
                 _showing=states.contains(Atspi.StateType.SHOWING),
@@ -267,7 +280,8 @@ def walk(Atspi, window=None, timeout=10, bounds=False):
 
 def tree(window=None, timeout=10, bounds=False):
     Atspi = atspi()
-    return [Node(n, depth=d) for d, n in walk(Atspi, window, timeout=timeout, bounds=bounds)]
+    return [Node(n, depth=d) for d, n in walk(Atspi, window, timeout=timeout, bounds=bounds)
+            if n._showing]
 
 
 def focused(Atspi, window=None):
@@ -283,8 +297,8 @@ def roles(Atspi, names):
 
 
 def lint(Atspi, nodes, ignore=()):
-    """(node, what's wrong) for each control, image or focusable node a
-    screen reader would have no name to say for. An image inside a named
+    """(node, what's wrong) for each showing control, image or focusable node
+    a screen reader would have no name to say for. An image inside a named
     control is part of it: the control's name is what gets said. Anything
     with a name inside it is said by what's in it, and a container with
     something focusable inside passes the focus on to it."""
@@ -310,7 +324,7 @@ def lint(Atspi, nodes, ignore=()):
 
     problems = []
     for n in nodes:
-        if n.name:
+        if n.name or not n._showing:
             continue
         if n._role in controls or (n._role == Atspi.Role.TEXT and "editable" in n.states):
             problems.append((n, f"{n.role} with no name"))
