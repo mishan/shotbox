@@ -662,9 +662,10 @@ def tab_walk(key="Tab", most=50, window=None, settle=2.0, timeout=10, visible=Fa
     doesn't do), so the rest of the window is walked before the trap. With
     `visible`, each node says how much of the screen round it changed as it
     took the focus (see shown()). With `document`, the nodes, what it never
-    reached and the text view are only those in the window's web documents,
-    though the walk goes through the browser's own controls too; a window
-    with none is refused."""
+    reached and the text view are only those in the window's web documents
+    (but the documents), though the walk goes through the browser's own
+    controls too, and a trap on a web document with nothing in the page it
+    never reached is a cycle; a window with no web document is refused."""
     Atspi = atspi()
     screen = Screen()
 
@@ -689,7 +690,8 @@ def tab_walk(key="Tab", most=50, window=None, settle=2.0, timeout=10, visible=Fa
         raise SessionError("no web document to walk: the window isn't a browser's")
 
     def mine(n):
-        return not document or n.path.startswith(tuple(docs))
+        return not document or (n.path.startswith(tuple(docs))
+                                and n._role != Atspi.Role.DOCUMENT_WEB)
 
     start = press(None, None)
     if start is None:
@@ -781,8 +783,12 @@ def tab_walk(key="Tab", most=50, window=None, settle=2.0, timeout=10, visible=Fa
     # Said only where the walk left it; else it's the trap.
     began = began if began and mine(began) and (began.get("left_by")
                                                  or began.get("walked_from")) else None
-    missed = unreached(Atspi, window, [n for n in (start, *seen) if n and mine(n)])
-    return [n for n in seen if mine(n)], how, [n for n in missed if mine(n)], began
+    missed = [n for n in unreached(Atspi, window, [n for n in (start, *seen) if n and mine(n)])
+              if mine(n)]
+    # A page's document keeping the focus, with nothing in the page to walk.
+    if document and how == "trap" and seen[-1]._role == Atspi.Role.DOCUMENT_WEB and not missed:
+        how = "cycle"
+    return [n for n in seen if mine(n)], how, missed, began
 
 
 def writing(Atspi, n):
@@ -2662,7 +2668,8 @@ def main(argv):
     w.add_argument("--max", type=int, default=50, metavar="N", help="at most this many (50)")
     w.add_argument("--reach-all", action="store_true",
                    help="fail where a showing, sensitive control is never reached; "
-                        "without it, they're said, as arrows or shortcuts may reach them")
+                        "without it, they're said, as arrows or shortcuts may reach them "
+                        "(but a --document walk that never lands in the page fails)")
     w.add_argument("--ignore", **ignore)
     w.add_argument("--document", action="store_true",
                    help="only what's in the window's web page: the walk goes through the "
@@ -2793,6 +2800,8 @@ def main(argv):
     seen, how, missed, began = tab_walk(a.key, a.max, a.window, timeout=a.timeout,
                                         visible=a.visible, document=a.document)
     missed = [n for n in missed if not skip(n, f"not reached by {a.key}")]
+    if a.document and how == "cycle" and missed and not seen:
+        how = "outside"
     if a.json:
         print(json.dumps({"focus": [public(n) for n in seen], "end": how,
                           "unreached": [public(n) for n in missed],
@@ -2839,6 +2848,7 @@ def walk_end(key, most, seen, how, missed, focus="shotbox focus"):
     unreached = f"; {len(missed)} not reached by {key}" if missed else ""
     return {
         "cycle": f"round again after {len(seen)}{unreached}",
+        "outside": f"round again, never in the page{unreached}",
         "trap": (f"stuck in a text view, which takes {key}: {', '.join(tried[:-1])} and "
                  f"{tried[-1]} leave the focus there" if tried
                  else f"stuck: {key} leaves the focus where it was"),

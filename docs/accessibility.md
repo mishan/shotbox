@@ -357,8 +357,15 @@ controls as before, and their presses count towards `--max`, but they
 aren't listed, nor said as not reached, nor held to by `--visible` and
 `--reach-all`, and the count on the last line is of the page's stops.
 Chromium's Tab lands on the document itself as it comes in from the
-browser's controls; that isn't one of the page's stops. A window with no web document in it is refused, exit 1: `no web document
-to walk: the window isn't a browser's`.
+browser's controls, as it can on an iframe's; those aren't among the
+page's stops. A walk that never gets into the page, though it has
+controls, isn't a pass, even without `--reach-all`: `round again,
+never in the page; 2 not reached by Tab`, exit 1, as in Firefox on a
+page whose controls are all `tabindex="-1"`. Chromium's Tab keeps the
+focus on such a page's document, a trap, exit 1, whatever `--ignore`
+leaves out; on a page with nothing to focus, that passes. A window
+with no web document in it is refused, exit 1: `no web document to
+walk: the window isn't a browser's`.
 
 With `--visible`, it also checks that the focus shows. It parks the
 pointer, takes a picture of the screen before the walk, and after each

@@ -98,8 +98,11 @@
   page, and says only its controls Tab never reached: Tab still goes
   through the browser's own (the address bar, Back, the tab strip),
   which were listed as not reached on every page. A window with no web
-  document is refused. `Screen.tab_walk(document=True)` and MCP's
-  `check_focus_order` with `document` have it too.
+  document is refused, and a walk that never gets into a page with
+  controls fails, even without `--reach-all`: `round again, never in
+  the page`.
+  `Screen.tab_walk(document=True)` and MCP's `check_focus_order` with
+  `document` have it too.
 - `compare` and `wait match` and `change` take `--ignore WxH+X+Y`
   (repeatable), as `flicker` does, to leave out a box that changes on
   its own, a clock or a cursor, as openQA's exclude areas and
