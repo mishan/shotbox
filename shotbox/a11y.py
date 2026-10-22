@@ -1279,10 +1279,24 @@ def wait_node(pattern, window=None, timeout=10):
             text = (f", its text {json.dumps(hidden.text, ensure_ascii=False)},"
                     if "text" in hidden else "")
             raise SessionError(f"{e}: {hidden.line()}{text} matches, but isn't showing") from None
-        near = difflib.get_close_matches(pattern, {t for n in seen
-                                                   for t in (n.name, n.get("_text")) if t}, 5)
+        # Shorter, anything is near.
+        if len(pattern) < 3:
+            raise SessionError(str(e)) from None
+        # A long text in pieces of whole words, about twice the pattern's
+        # length, each compared and said on its own: whole, it's never near.
+        width, said = 2 * len(pattern), {}
+        for t in {t for n in seen for t in (n.name, n.get("_text")) if t}:
+            words = t.split() if len(t) > 80 else [t]
+            for i in range(len(words)):
+                j, length = i + 1, len(words[i])
+                while j < len(words) and length < width:
+                    length, j = length + 1 + len(words[j]), j + 1
+                piece = " ".join(words[i:j])
+                said.setdefault(piece, "…" * (i > 0) + around(piece, 0, 0)
+                                + "…" * (j < len(words)))
+        near = difflib.get_close_matches(pattern, said, 5)
         raise SessionError(f"{e}. The nearest: " + ", ".join(
-            json.dumps(around(t, 0, 0), ensure_ascii=False) for t in near) if near
+            json.dumps(said[t], ensure_ascii=False) for t in near) if near
             else f"{e}: nothing in the tree comes near it") from None
 
 

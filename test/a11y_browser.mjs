@@ -131,7 +131,8 @@ try
 
     /* A node by its text, which comes back cut round what matched, and
        by its text round an element in it; one scrolled out of view said
-       by its text, having no name. */
+       by its text, having no name; and the part of a long text near a
+       pattern that isn't in it. */
     const texts = await browser.newPage();
 
     await texts.setContent(`<title>a11y-text</title>
@@ -142,6 +143,8 @@ try
     run('wait', 'node', '^Done now$', '--window', 'a11y-text.*', '--timeout', '0');
     const further = spawnSync(shotbox, ['wait', 'node', 'Further', '--window', 'a11y-text.*',
                                         '--timeout', '0'], { encoding: 'utf8' }).stderr;
+    const nearest = spawnSync(shotbox, ['wait', 'node', 'ipsum. Drwan Lorem', '--window',
+                                        'a11y-text.*', '--timeout', '0'], { encoding: 'utf8' }).stderr;
     await texts.close();
 
     /* One that won't build its page's tree for a reader. */
@@ -185,6 +188,7 @@ try
         around,
         long,
         further,
+        nearest,
         said: fs.readFileSync(process.env.SHOTBOX_ANNOUNCEMENTS, 'utf8'),
         hint,
         whole,
