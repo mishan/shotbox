@@ -15,6 +15,11 @@
   `check_accessible_names` and `check_contrast` lines end the same way.
   `--ignore` matches the ending too: `--ignore 'div#intro'`. A script
   that reads the lines as `PATH: WHAT` gets the end in WHAT.
+- **`a11y tabwalk` says a web page's controls Tab never reaches in
+  Chromium**, so `--reach-all` can fail where it passed: Tab lands on
+  the page's document coming in from the toolbar, and that counted as
+  reaching all that's in it, so a button with `tabindex="-1"` passed.
+  Leave out what's meant to be off the Tab order with `--ignore`.
 - **A click or scroll by name waits until the node is placed, enabled,
   still and uncovered**, and fails, saying which it isn't, when its
   timeout runs out: `gave up after 10s: button "Save" [focusable,
@@ -166,10 +171,6 @@
   round: the page's controls after it were said as not reached, failing
   `--reach-all`, and the browser was left there for the next walk. In a
   web page Tab is pressed first; the rest only if it keeps the focus.
-- `a11y tabwalk` says a web page's controls Tab never reaches in
-  Chromium: Tab lands on the page's document coming in from the
-  toolbar, and that counted as reaching all that's in it, so a button
-  with `tabindex="-1"` passed `--reach-all`.
 - A read of the accessible tree (`a11y tree`, `lint`, a click by name
   and the rest) failed with `Object does not exist at path …` when a
   window closed while it was read. A window gone is left out, as a node
