@@ -967,6 +967,9 @@ if atspi; then
     '$sb' wait node '^a window\$' --window g3" > "$tmp/node" 2>&1 && ! grep -q CRITICAL "$tmp/node" \
     && ok "a11y: wait node, GTK 3: no CRITICAL for what has no text" \
     || { fail "a11y: wait node, GTK 3"; cat "$tmp/node"; }
+  set +e; "$sb" wait node 2>/dev/null; st=$?; "$sb" wait node '' 2>/dev/null; st2=$?; set -e
+  [ $st = 2 ] && [ $st2 = 2 ] && ok "a11y: wait node with no regex, or an empty one, is refused" \
+    || fail "a11y: wait node with no regex: status $st, $st2"
   # Under a dialog, disabled, moving and under a label, each is said and not
   # clicked (--force clicks the disabled one, which does nothing), then
   # waited for until "Ready" puts each right, and clicked.

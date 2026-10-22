@@ -1245,6 +1245,8 @@ def wait_node(pattern, window=None, timeout=10):
     that's what matched. Giving up, say what came nearest: a match that
     isn't showing, else the nearest names and texts, or that there were
     none."""
+    if not pattern:
+        raise SessionError("wait node needs a regex to look for: an empty one matches any node")
     Atspi = atspi()
     try:
         found = re.compile(pattern)
