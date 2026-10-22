@@ -130,14 +130,18 @@ try
     await tabbed.close();
 
     /* A node by its text, which comes back cut round what matched, and
-       by its text round an element in it. */
+       by its text round an element in it; one scrolled out of view said
+       by its text, having no name. */
     const texts = await browser.newPage();
 
     await texts.setContent(`<title>a11y-text</title>
         <p>${'Lorem ipsum. '.repeat(100)}Drawn${' Lorem ipsum.'.repeat(100)}</p>
-        <p>Done <a href="#">here</a> now</p>`);
+        <p>Done <a href="#">here</a> now</p>
+        <p style="margin-top: 3000px">Further down</p>`);
     const long = JSON.parse(run('a11y', 'node', 'Drawn', '--json', '--window', 'a11y-text.*'));
     run('wait', 'node', '^Done now$', '--window', 'a11y-text.*', '--timeout', '0');
+    const further = spawnSync(shotbox, ['wait', 'node', 'Further', '--window', 'a11y-text.*',
+                                        '--timeout', '0'], { encoding: 'utf8' }).stderr;
     await texts.close();
 
     /* One that won't build its page's tree for a reader. */
@@ -180,6 +184,7 @@ try
         walk,
         around,
         long,
+        further,
         said: fs.readFileSync(process.env.SHOTBOX_ANNOUNCEMENTS, 'utf8'),
         hint,
         whole,

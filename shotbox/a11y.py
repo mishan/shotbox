@@ -1276,7 +1276,9 @@ def wait_node(pattern, window=None, timeout=10):
             raise
         hidden = next((n for n in seen if not n._showing and matches(n)), None)
         if hidden:
-            raise SessionError(f"{e}: {hidden.line()} matches, but isn't showing") from None
+            text = (f", its text {json.dumps(hidden.text, ensure_ascii=False)},"
+                    if "text" in hidden else "")
+            raise SessionError(f"{e}: {hidden.line()}{text} matches, but isn't showing") from None
         near = difflib.get_close_matches(pattern, {t for n in seen
                                                    for t in (n.name, n.get("_text")) if t}, 5)
         raise SessionError(f"{e}. The nearest: " + ", ".join(
