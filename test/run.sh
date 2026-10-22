@@ -771,7 +771,8 @@ chords "$tmp/chords.log" && ok "shift in a chord: the shifted symbol, and back-t
   || fail "shift chords"
 got=$(held "$tmp/held.log")
 [ "$got" = "$want_held" ] && [ "$(held_for "$tmp/held.log")" -ge 35 ] \
-  && ok "key and click --hold: held together, let go last first" || fail "hold: $got"
+  && ok "key and click --hold: held together, let go last first" \
+  || fail "hold: $got(a for $(held_for "$tmp/held.log")0 ms)"
 # down LOG [SESSION OPTIONS]: --down and --up, a key left down between two
 # commands: X11's server keeps it, and on Wayland the session's keyboard;
 # and Shift left down alone shifts the next command's key.
@@ -1712,7 +1713,7 @@ if command -v sway >/dev/null && command -v grim >/dev/null; then
     && ok "wayland: shift in a chord: the shifted symbol, and back-tab" || fail "wayland: shift chords"
   got=$(held "$tmp/wl-held.log" --wayland)
   [ "$got" = "$want_held" ] && [ "$(held_for "$tmp/wl-held.log")" -ge 35 ] \
-    && ok "wayland: key and click --hold" || fail "wayland: hold: $got"
+    && ok "wayland: key and click --hold" || fail "wayland: hold: $got(a for $(held_for "$tmp/wl-held.log")0 ms)"
   down "$tmp/wl-down.log" --wayland && ok "wayland: key --down, then --up: held between commands, Shift alone too" \
     || fail "wayland: --down, --up: $(tr '\n' ' ' < "$tmp/wl-down.log")"
   set +e; "$sb" run --wayland -- "$sb" click 1 1 --down 2> "$tmp/err"; st=$?; set -e
