@@ -71,6 +71,16 @@ Xwayland, for GTK 4, GTK 3, Qt 5 and AccessKit's toolkits (egui, Slint,
 Bevy, GTK built with it), and for Chromium (Google Chrome, Playwright's
 Chromium, and the browsers built on it), headed, on X11.
 
+What `wait node` takes as showing is what the toolkit says is, which
+isn't what can be seen: text drawn at opacity 0, or with something over
+it, is showing, as is an element of no size in Chromium (Firefox says
+it isn't), and a GTK 4 row scrolled out of view (GTK 3's isn't). Each
+poll walks the tree, every window's, and reads the text of each node
+whose name doesn't match: seconds on a large page, as many as the
+machine takes, more in Chromium than in Firefox; one under way when the
+timeout runs out is finished first. `--window` keeps it to that
+window's tree.
+
 ## The bus
 
 With `--a11y`, the session:
