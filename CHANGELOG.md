@@ -92,8 +92,8 @@
   it too, and say the node's text where that matched, cut to 80
   characters round the match.
 - A recipe, in docs/recipes.md: a web app in Firefox, served on the
-  session's own network, in a profile made in the session, its window
-  sized to the screen, pictured once the page says it's drawn.
+  session's own network, in a new profile each run, its window sized
+  to the screen, pictured once the page says it's drawn.
 - `a11y tabwalk --document` lists only what's in a browser window's web
   page, and says only its controls Tab never reached: Tab still goes
   through the browser's own (the address bar, Back, the tab strip),

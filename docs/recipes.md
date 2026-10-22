@@ -179,15 +179,23 @@ shotbox capture app.png
 
 `--net loopback` gives the session a network of its own: the server
 and the browser reach each other on `127.0.0.1`, and nothing else does.
-`wait port` looks for the server there. The profile is made inside the
-session, so it's fresh each run: one made outside isn't there, and
-Firefox opens a "Profile Missing" dialog in place of the page. To
-spawn it into a lasting session from outside, make the profile in the
-command:
+`wait port` looks for the server there. The profile is made new each
+run, so nothing an earlier one left in it, a cached page or tabs to
+restore, changes what's pictured. One made outside the session works
+too, since the sandbox shows the machine's files, hiding only the
+desktop's `/run/user/UID`: a profile there isn't found, and Firefox
+opens a "Profile Missing" dialog in place of the page. In a lasting
+session, worked from outside:
 
 ```
+shotbox start --name web --net loopback --a11y --screen 1600x1000
+shotbox spawn --session web -- python3 -m http.server 8000 --bind 127.0.0.1 --directory site
+shotbox --session web wait port 8000
 shotbox spawn --session web -- sh -c 'p=$(mktemp -d)
-  exec firefox --kiosk --new-instance --profile "$p" --width 1600 --height 1000 URL'
+  exec firefox --kiosk --new-instance --profile "$p" --width 1600 --height 1000 http://127.0.0.1:8000/'
+shotbox --session web wait node '^Drawn$' --window '.*Mozilla Firefox' --timeout 60
+shotbox --session web capture app.png
+shotbox stop web
 ```
 
 With no window manager, `--kiosk` doesn't fill the screen: the window
