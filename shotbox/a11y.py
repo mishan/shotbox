@@ -650,12 +650,13 @@ def tab_walk(key="Tab", most=50, window=None, settle=2.0, timeout=10, visible=Fa
     window manager), and nothing is pressed into that. A press that leaves
     it on the one thing in the window that could take it is a cycle of one.
     `key` isn't pressed in a text view one writes in, which takes Tab for
-    itself: ESCAPES are, noted on it as `tried`, the one that moves the
-    focus as `left_by`, one after which its text changed as `edited`; none
-    is a trap, and one after which the text view isn't there ends the walk,
-    "closed". Escape isn't tried in a dialog, which it would close, nor
-    shift+Tab but in Qt; once that leaves, backward, the walk goes on from
-    the first thing after the text view that takes the focus (grab_focus).
+    itself, but first in a web page's, as a textarea doesn't: ESCAPES are,
+    noted on it as `tried`, the one that moves the focus as `left_by`, one
+    after which its text changed as `edited`; none is a trap, and one after
+    which the text view isn't there ends the walk, "closed". Escape isn't
+    tried in a dialog, which it would close, nor shift+Tab but in Qt; once
+    that leaves, backward, the walk goes on from the first thing after the
+    text view that takes the focus (grab_focus).
     Where the walk began in one nothing leaves, it gives the focus to the
     first thing outside it that takes it (AT-SPI's grab_focus, which GTK 4
     doesn't do), so the rest of the window is walked before the trap. With
@@ -707,6 +708,17 @@ def tab_walk(key="Tab", most=50, window=None, settle=2.0, timeout=10, visible=Fa
         n["tried"], n["left_by"] = [], None
         dialog, qt = in_dialog(Atspi, n), toolkit(n).startswith("Qt")
         text = contents(Atspi, n)
+        # A web page's textarea doesn't take Tab, and a browser's ctrl+Tab
+        # and F6 go to its other tabs and its toolbar: they're for a web
+        # editor that does.
+        if "/document web[" in n.path:
+            now = press(key, n)
+            if now is None or now._id != n._id:
+                del n["tried"], n["left_by"]
+                return now, None
+            n["tried"].append(key)
+            if contents(Atspi, n) != text:
+                n["edited"], text = key, contents(Atspi, n)
         for k in ESCAPES:
             if k == key or (dialog and k == "Escape") or (k == "shift+Tab" and not qt):
                 continue

@@ -156,6 +156,13 @@
   Qt's and Chromium's aren't, so their text is measured in them again.
   With `--window`, a faint GTK 3 label was said as not found, "GTK None
   reports where its widgets are wrong".
+- `a11y tabwalk` takes a web page's `<textarea>` as the browser does:
+  Tab moves on from it. It was taken for a text view that keeps Tab
+  and left with ctrl+Tab, which goes to the browser's next tab, Escape
+  and F6, which in Chromium goes into the toolbar, where Tab then went
+  round: the page's controls after it were said as not reached, failing
+  `--reach-all`, and the browser was left there for the next walk. In a
+  web page Tab is pressed first; the rest only if it keeps the focus.
 - `a11y tabwalk` says a web page's controls Tab never reaches in
   Chromium: Tab lands on the page's document coming in from the
   toolbar, and that counted as reaching all that's in it, so a button

@@ -386,7 +386,7 @@ test('Chromium on an --a11y session: its tree, a click by name, a node waited fo
     assert.deepEqual(behind['a11y-unshown'].behind, []);
     assert.deepEqual(behind['a11y-unshown'].problems.map((n) => n.name), ['Faint words']);
     assert.deepEqual([walk.end, walk.focus.map((n) => n.name), walk.unreached.map((n) => n.name)],
-                     ['cycle', ['Two', 'One'], ['Off']]);
+                     ['cycle', ['Notes', 'Two', 'One'], ['Off']]);
     assert.ok(around.unreached.some((n) => n.name === 'Off'), JSON.stringify(around.unreached));
     assert.match(long.text, /^….+Drawn.+…$/);
     assert.equal(long.text.length, 82);

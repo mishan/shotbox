@@ -117,12 +117,13 @@ try
     }
 
     /* The page's Tab order: through the browser's controls, but only
-       the page's said; and without --document, the page's button Tab
-       skips said too, though Tab lands on the document it's in. */
+       the page's said, Tab going on from a textarea; and without
+       --document, the page's button Tab skips said too, though Tab
+       lands on the document it's in. */
     const tabbed = await browser.newPage();
 
     await tabbed.setContent(`<title>a11y-tabdoc</title><button>One</button>
-        <a href="#two">Two</a><button tabindex="-1">Off</button>`);
+        <textarea aria-label="Notes">hi</textarea><a href="#two">Two</a><button tabindex="-1">Off</button>`);
     await tabbed.focus('button');
     const walk = JSON.parse(run('a11y', 'tabwalk', '--document', '--json',
                                 '--window', 'a11y-tabdoc.*'));

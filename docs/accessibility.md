@@ -310,13 +310,17 @@ the document: it tries ctrl+Tab, which GTK's text views take to move
 on, then in Qt shift+Tab, Qt's (GTK's text views type a tab for it),
 Escape (not in a dialog or alert, which it would close, libadwaita's in
 its window's frame too), and F6, a pane's key, last, since Kate and
-KWrite show a view with it. shift+Tab leaves backward, so the walk then
-gives the focus to the first thing after the text view that takes it
-(AT-SPI's `grab_focus`, which Qt does) and goes on from there. The
-first that moves the focus is said on the node, `a text view: ctrl+Tab
-leaves it`, and the walk goes on; if none does, it's a trap, exit 1,
-`stuck in a text view`. One that changes the text is said on the node
-too, and if the text view is gone after
+KWrite show a view with it. A web page's `<textarea>` doesn't take
+Tab, so in a web page it presses Tab first, and if that moves the
+focus the walk goes on as from any other stop; only a web editor that
+keeps Tab gets the rest (a browser's ctrl+Tab goes to its next tab,
+and Chromium's F6 into its toolbar). shift+Tab leaves backward, so
+the walk then gives the focus to the first thing after the text view
+that takes it (AT-SPI's `grab_focus`, which Qt does) and goes on
+from there. The first that moves the focus is said on the node, `a
+text view: ctrl+Tab leaves it`, and the walk goes on; if none does,
+it's a trap, exit 1, `stuck in a text view`. One that changes the
+text is said on the node too, and if the text view is gone after
 one, the walk stops there, exit 1. An editor's own shortcuts can take
 ctrl+Tab: gedit's moves the focus somewhere no node says, and Tab goes
 on from there; gnome-text-editor keeps it for all of them. A walk that
