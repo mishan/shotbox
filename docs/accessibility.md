@@ -50,7 +50,9 @@ Inside a session with `--a11y`:
   sets once it's done, where the screen holding still says nothing (a
   WebGL canvas waiting on its server). Giving up, it says what came
   nearest: a match that isn't showing (scrolled out of view), or the
-  nearest names and texts, or that nothing comes near.
+  nearest names and texts, or that nothing comes near. Python's
+  `wait_node` and MCP's `wait_for` give the text that matched cut to 80
+  characters round the match.
 
 ```
 shotbox run --a11y -- sh -c 'gnome-text-editor &

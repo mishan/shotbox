@@ -1222,11 +1222,19 @@ def at_node(name, role, window, timeout, act, force=False):
     return n
 
 
+def around(text, start, end, most=80):
+    """`text` cut to `most` characters round its `start`:`end`, with … where
+    it's cut: a page's text can run to megabytes."""
+    a = max(0, min((start + end - most) // 2, len(text) - most, start))
+    return "…" * (a > 0) + text[a:a + most] + "…" * (a + most < len(text))
+
+
 def wait_node(pattern, window=None, timeout=10):
     """Wait for a showing node with `pattern`, a regex, found in its name
-    or text; that node, with its text as `text` where that's what
-    matched. Giving up, say what came nearest: a match that isn't
-    showing, else the nearest names and texts, or that there were none."""
+    or text; that node, with its text round the match as `text` where
+    that's what matched. Giving up, say what came nearest: a match that
+    isn't showing, else the nearest names and texts, or that there were
+    none."""
     Atspi = atspi()
     try:
         found = re.compile(pattern)
@@ -1239,8 +1247,9 @@ def wait_node(pattern, window=None, timeout=10):
             return True
         # A page's text: U+FFFC stands in it for each element in it.
         n["_text"] = (contents(Atspi, n) or "").replace("\ufffc", "")
-        if found.search(n._text):
-            n["text"] = n._text
+        m = found.search(n._text)
+        if m:
+            n["text"] = around(n._text, *m.span())
             return True
         return False
 
@@ -1260,7 +1269,7 @@ def wait_node(pattern, window=None, timeout=10):
         near = difflib.get_close_matches(pattern, {t for n in seen
                                                    for t in (n.name, n.get("_text")) if t}, 5)
         raise SessionError(f"{e}. The nearest: " + ", ".join(
-            json.dumps(t, ensure_ascii=False) for t in near) if near
+            json.dumps(around(t, 0, 0), ensure_ascii=False) for t in near) if near
             else f"{e}: nothing in the tree comes near it") from None
 
 
