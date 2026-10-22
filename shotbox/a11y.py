@@ -656,7 +656,9 @@ def tab_walk(key="Tab", most=50, window=None, settle=2.0, timeout=10, visible=Fa
     which the text view isn't there ends the walk, "closed". Escape isn't
     tried in a dialog, which it would close, nor shift+Tab but in Qt; once
     that leaves, backward, the walk goes on from the first thing after the
-    text view that takes the focus (grab_focus).
+    text view that takes the focus (grab_focus). A cycle with no stop in a
+    web page after one of a web page's was left so is "escaped", and
+    Escape is pressed, back to the page.
     Where the walk began in one nothing leaves, it gives the focus to the
     first thing outside it that takes it (AT-SPI's grab_focus, which GTK 4
     doesn't do), so the rest of the window is walked before the trap. With
@@ -778,6 +780,17 @@ def tab_walk(key="Tab", most=50, window=None, settle=2.0, timeout=10, visible=Fa
 
     try:
         seen, how = go()
+        # Left a web page's text view by a browser's key (Chromium's F6, to
+        # its toolbar's pane), and Tab went round the browser's controls,
+        # never back in the page. Escape takes Chromium back to it (F6 does
+        # too, but leaves Tab stuck there).
+        walked = [n for n in (start, *seen) if n]
+        out = next((i for i in range(len(walked) - 1, -1, -1)
+                    if "/document web[" in walked[i].path and walked[i].get("left_by")), None)
+        if how == "cycle" and out is not None and not any(
+                "/document web[" in n.path for n in walked[out + 1:]):
+            how = "escaped"
+            screen.key("Escape")
     finally:
         screen.close()
     # Said only where the walk left it; else it's the trap.
@@ -2846,22 +2859,27 @@ def walk_lines(key, most, seen, how, missed, began, focus="shotbox focus"):
     lines = [f"began in {marked(began)}"] if began else []
     lines += [marked(n) for n in seen]
     lines += [f"not reached by {key}: {n.line()}" for n in missed]
-    lines.append(walk_end(key, most, seen, how, missed, focus))
+    lines.append(walk_end(key, most, seen, how, missed, focus, began))
     hidden = [n for n in seen if unseen(n)]
     if hidden:
         lines.append(f"focus not shown on {len(hidden)}")
     return lines
 
 
-def walk_end(key, most, seen, how, missed, focus="shotbox focus"):
+def walk_end(key, most, seen, how, missed, focus="shotbox focus", began=None):
     """How a walk ended, as a line."""
     tried = seen[-1].get("tried") if seen else None
+    # The key itself is tried first in a web page's, and is the one it takes.
+    others = [k for k in tried or [] if k != key]
+    left = next((n.left_by for n in reversed([began, *seen]) if n and n.get("left_by")), None)
     unreached = f"; {len(missed)} not reached by {key}" if missed else ""
     return {
         "cycle": f"round again after {len(seen)}{unreached}",
         "outside": f"round again, never in the page{unreached}",
-        "trap": (f"stuck in a text view, which takes {key}: {', '.join(tried[:-1])} and "
-                 f"{tried[-1]} leave the focus there" if tried
+        "escaped": f"left the page by {left}, and {key} never came back to it{unreached}",
+        "trap": (f"stuck in a text view, which takes {key}: "
+                 + " and ".join(filter(None, [", ".join(others[:-1]), others[-1]]))
+                 + (" leave" if len(others) > 1 else " leaves") + " the focus there" if others
                  else f"stuck: {key} leaves the focus where it was"),
         "lost": f"lost: after {key}, no node has the focus",
         "closed": f"stopped: after {tried and tried[-1]}, the text view isn't there",

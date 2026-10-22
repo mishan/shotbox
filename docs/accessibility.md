@@ -324,10 +324,13 @@ KWrite show a view with it. A web page's `<textarea>` doesn't take
 Tab, so in a web page it presses Tab first, and if that moves the
 focus the walk goes on as from any other stop; only a web editor that
 keeps Tab gets the rest (a browser's ctrl+Tab goes to its next tab,
-and Chromium's F6 into its toolbar). shift+Tab leaves backward, so
-the walk then gives the focus to the first thing after the text view
-that takes it (AT-SPI's `grab_focus`, which Qt does) and goes on
-from there. The first that moves the focus is said on the node, `a
+and Chromium's F6 into its toolbar). If one of those leaves the page
+and Tab, going round the browser's controls, never comes back to it,
+the walk says so, exit 1: `left the page by F6, and Tab never came
+back to it`, and presses Escape, which takes Chromium back to the
+page. shift+Tab leaves backward, so the walk then gives the focus to
+the first thing after the text view that takes it (AT-SPI's
+`grab_focus`, which Qt does) and goes on from there. The first that moves the focus is said on the node, `a
 text view: ctrl+Tab leaves it`, and the walk goes on; if none does,
 it's a trap, exit 1, `stuck in a text view`. One that changes the
 text is said on the node too, and if the text view is gone after

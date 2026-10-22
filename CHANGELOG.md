@@ -170,7 +170,10 @@
   and F6, which in Chromium goes into the toolbar, where Tab then went
   round: the page's controls after it were said as not reached, failing
   `--reach-all`, and the browser was left there for the next walk. In a
-  web page Tab is pressed first; the rest only if it keeps the focus.
+  web page Tab is pressed first; the rest only if it keeps the focus,
+  and where one of them leaves the page and Tab never comes back to
+  it, the walk fails, `left the page by F6, and Tab never came back to
+  it`, and presses Escape to take Chromium back to the page.
 - A read of the accessible tree (`a11y tree`, `lint`, a click by name
   and the rest) failed with `Object does not exist at path …` when a
   window closed while it was read. A window gone is left out, as a node

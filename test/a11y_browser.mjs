@@ -12,10 +12,10 @@
  * faint paragraph's contrast measured, said with its DOM tag, text and
  * id, and ignored by them, and one behind an aria-modal dialog said
  * apart, but not behind one off the screen or of no size, its page's
- * Tab order walked without the browser's own controls, a node found by
- * its text, a browser that builds no page's tree for a reader told apart
- * from an empty one, a big page read whole, and a crashed tab noted.
- * Prints what it found as JSON.
+ * Tab order walked without the browser's own controls, and how such a
+ * walk ends, a node found by its text, a browser that builds no page's
+ * tree for a reader told apart from an empty one, a big page read whole,
+ * and a crashed tab noted. Prints what it found as JSON.
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -148,6 +148,35 @@ try
                                         'a11y-text.*', '--timeout', '0'], { encoding: 'utf8' }).stderr;
     await texts.close();
 
+    /* How a walk ends: on a web editor that keeps Tab (F6 takes
+       Chromium into its toolbar, and Tab never comes back), twice in a
+       row, the second beginning in it; and with --document, on a page
+       with nothing to focus, one whose controls are all out of the Tab
+       order, and one that keeps Tab for itself. */
+    const ends = {};
+
+    for (const [name, html, walks] of [
+        ['editor', `<button>A</button><textarea aria-label="Code">x</textarea><button>B</button>
+            <script>document.querySelector('textarea').onkeydown = (e) =>
+            { if (e.key === 'Tab') e.preventDefault(); };</script>`, [[], []]],
+        ['empty', '<p>Nothing here</p>', [['--document']]],
+        ['allneg', '<button tabindex="-1">A</button><button tabindex="-1">B</button>',
+         [['--document']]],
+        ['trapdoc', `<button>A</button><button>B</button><script>document.addEventListener(
+            'keydown', (e) => { if (e.key === 'Tab') e.preventDefault(); }, true);</script>`,
+         [['--document']]],
+    ])
+    {
+        const p = await browser.newPage();
+
+        await p.setContent(`<title>a11y-${name}</title>${html}`);
+        if (name === 'editor')
+            await p.focus('button');
+        ends[name] = walks.map((args) => JSON.parse(run('a11y', 'tabwalk', ...args, '--json',
+                                                        '--window', `a11y-${name}.*`)).end);
+        await p.close();
+    }
+
     /* One that won't build its page's tree for a reader. */
     const blind = await chromium.launch({ ...accessible,
         args: [...accessible.args, '--disable-platform-accessibility-integration'] });
@@ -190,6 +219,7 @@ try
         long,
         further,
         nearest,
+        ends,
         said: fs.readFileSync(process.env.SHOTBOX_ANNOUNCEMENTS, 'utf8'),
         hint,
         whole,
