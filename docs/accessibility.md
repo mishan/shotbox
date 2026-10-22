@@ -52,7 +52,10 @@ Inside a session with `--a11y`:
   nearest: a match that isn't showing (scrolled out of view), or the
   nearest names and texts, or that nothing comes near. Python's
   `wait_node` and MCP's `wait_for` give the text that matched cut to 80
-  characters round the match.
+  characters round the match. A page's text is matched with each
+  element in it taken out and the spaces beside it made one: `<p>Done
+  <a>here</a> now</p>` matches "Done now"; with no space beside it, the
+  text either side joins, `Join<button>X</button>Me` as "JoinMe".
 
 ```
 shotbox run --a11y -- sh -c 'gnome-text-editor &

@@ -1229,6 +1229,16 @@ def around(text, start, end, most=80):
     return "…" * (a > 0) + text[a:a + most] + "…" * (a + most < len(text))
 
 
+def unembedded(text):
+    """`text` without the U+FFFC that stands in a page's text for each
+    element in it, and the space round one made one, so `Done <a>here</a>
+    now` reads "Done now". Not with the element's text in its place: that
+    takes round trips an element, and those of each in it, each poll; and
+    the element's text is matched on its own."""
+    return re.sub(r"\s*\ufffc[\s\ufffc]*", lambda m: " " if (
+        m.start() and m.end() < len(text) and m[0].strip("\ufffc")) else "", text)
+
+
 def wait_node(pattern, window=None, timeout=10):
     """Wait for a showing node with `pattern`, a regex, found in its name
     or text; that node, with its text round the match as `text` where
@@ -1245,8 +1255,7 @@ def wait_node(pattern, window=None, timeout=10):
     def matches(n):
         if found.search(n.name):
             return True
-        # A page's text: U+FFFC stands in it for each element in it.
-        n["_text"] = (contents(Atspi, n) or "").replace("\ufffc", "")
+        n["_text"] = unembedded(contents(Atspi, n) or "")
         m = found.search(n._text)
         if m:
             n["text"] = around(n._text, *m.span())

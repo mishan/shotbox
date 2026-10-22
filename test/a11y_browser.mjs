@@ -129,12 +129,15 @@ try
     const around = JSON.parse(run('a11y', 'tabwalk', '--json', '--window', 'a11y-tabdoc.*'));
     await tabbed.close();
 
-    /* A node by its text, which comes back cut round what matched. */
+    /* A node by its text, which comes back cut round what matched, and
+       by its text round an element in it. */
     const texts = await browser.newPage();
 
     await texts.setContent(`<title>a11y-text</title>
-        <p>${'Lorem ipsum. '.repeat(100)}Drawn${' Lorem ipsum.'.repeat(100)}</p>`);
+        <p>${'Lorem ipsum. '.repeat(100)}Drawn${' Lorem ipsum.'.repeat(100)}</p>
+        <p>Done <a href="#">here</a> now</p>`);
     const long = JSON.parse(run('a11y', 'node', 'Drawn', '--json', '--window', 'a11y-text.*'));
+    run('wait', 'node', '^Done now$', '--window', 'a11y-text.*', '--timeout', '0');
     await texts.close();
 
     /* One that won't build its page's tree for a reader. */
