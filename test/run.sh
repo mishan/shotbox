@@ -962,6 +962,11 @@ if atspi; then
     && grep -qx "shotbox: gave up waiting for a node matching 'Saev' after 0.5s. The nearest: \"Save\"" "$tmp/node" \
     && ok "a11y: wait node waits for a node to show, by its name or text, or says what's near" \
     || { fail "a11y: wait node"; cat "$tmp/node"; }
+  # Asked for the text of what has none, the frame, GTK 3 logs a CRITICAL.
+  "$sb" run --a11y -- sh -c "'$here/window.py' g3 & '$sb' wait window g3 >/dev/null &&
+    '$sb' wait node '^a window\$' --window g3" > "$tmp/node" 2>&1 && ! grep -q CRITICAL "$tmp/node" \
+    && ok "a11y: wait node, GTK 3: no CRITICAL for what has no text" \
+    || { fail "a11y: wait node, GTK 3"; cat "$tmp/node"; }
   # Under a dialog, disabled, moving and under a label, each is said and not
   # clicked (--force clicks the disabled one, which does nothing), then
   # waited for until "Ready" puts each right, and clicked.

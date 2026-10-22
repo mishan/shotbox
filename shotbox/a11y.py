@@ -790,8 +790,10 @@ def toolkit(n):
 
 
 def contents(Atspi, n):
+    # Not asked of what has none: GTK 3 logs a CRITICAL each time.
     try:
-        return Atspi.Text.get_text(n._acc, 0, -1)
+        return (Atspi.Text.get_text(n._acc, 0, -1) if "Text" in n._acc.get_interfaces()
+                else None)
     except Exception:   # gone since
         return None
 
