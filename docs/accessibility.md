@@ -262,21 +262,31 @@ is hard to map back to its source, so a lint or contrast line on a node
 in one also says where it is in the page's DOM, after `  <- `, as
 Chromium and Firefox give it (their `tag`, `id` and `class` object
 attributes): the element's tag, and its id if it has one, then the
-node's text, cut at 40 characters, then, if the element has no id, the
-nearest element round it that has one:
+node's text (or its name, an `aria-label`'s), cut at 40 characters,
+then, if the element has no id, the nearest element round it that has
+one:
 
 ```
 PATH: button with no name  <- button#icon
 PATH: text 2.84:1, #999999 on #ffffff (at least 4.5)  <- p "Faint words" in div#intro
 ```
 
-A text node isn't an element: its element's tag is said. Classes are
-left out of the line, where they can run long. With `--json`, such a
-node has `dom`, its element's `tag`, `id` and `class` where it has them,
-and `in`, those of the nearest with an id, `{"tag": "p", "in": {"tag":
-"div", "id": "intro", "class": "card"}}`, and `text`, cut as the
-line's is. `--ignore` is matched against the line with them too:
-`--ignore 'div#intro'`, `--ignore '#icon'`.
+A text node isn't an element: its element's tag is said. The elements
+are those in the browser's tree, not the DOM's every one: Chromium
+leaves out a generic element (a `span`, a `div`) with no id, so the
+tag, class and nearest id said can be of one round the node's own
+(`<div><span class="f">Deep</span></div>` is said `div "Deep"`), and
+in a shadow root its `div`s, even with an id, so a node in one is said
+in its host's id. An iframe's document ends the climb: a node in one
+is said in an id in the iframe's page, or none. Classes are left out
+of the line, where they can run long. Firefox's contrast doesn't
+measure a paragraph's text, so there a contrast line is a control's, a
+link's or a button's. With `--json`, such a node has `dom`, its
+element's `tag`, `id` and `class` where it has them, and `in`, those
+of the nearest with an id, `{"tag": "p", "in": {"tag": "div", "id":
+"intro", "class": "card"}}`, and `text`, cut as the line's is.
+`--ignore` is matched against the line with them too: `--ignore
+'div#intro'`, `--ignore '#icon'`.
 
 ## Walking the Tab order
 
