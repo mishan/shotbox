@@ -446,13 +446,22 @@ def walk(Atspi, window=None, timeout=10, bounds=False, until=None):
             return
         n["_top"] = top
         out.append((depth, n))
-        for i in range(acc.get_child_count()):
+        try:
+            count = acc.get_child_count()
+        except Exception:   # gone while we looked: a window closing
+            return
+        for i in range(count):
             if done():
                 return
-            child = acc.get_child_at_index(i)
-            if child is not None:
+            try:
+                child = acc.get_child_at_index(i)
+                if child is None:
+                    continue
                 role = child.get_role()
-                visit(child, role, depth + 1, f"{path}/{role_name(Atspi, child, role)}[{i}]", web)
+                at = f"{path}/{role_name(Atspi, child, role)}[{i}]"
+            except Exception:   # gone while we looked: a window closing
+                return
+            visit(child, role, depth + 1, at, web)
 
     for _, top in toplevels(Atspi, window, timeout):
         if done():

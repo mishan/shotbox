@@ -234,8 +234,9 @@
 - A read of the accessible tree (`a11y tree`, `lint`, a click by name
   and the rest) failed with `Object does not exist at path …` when a
   window closed while it was read. A window gone is left out, as a node
-  gone already was; one gone before its bounds are read leaves its
-  nodes' bounds `null`, as a node gone then had.
+  gone already was, and so are its nodes when it goes while they're
+  walked; one gone before its bounds are read leaves its nodes' bounds
+  `null`, as a node gone then had.
 - `compare` failed on two pictures with a million or more pixels
   differing, unable to read ImageMagick's count, `1.04e+06`; it counts
   them exactly now.
