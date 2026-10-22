@@ -2399,6 +2399,11 @@ def public(n):
     return {k: v for k, v in n.items() if not k.startswith("_")}
 
 
+# What dom() has read of each node it climbed through, in this run: a
+# page's findings share the elements round them.
+CLIMBED = {}
+
+
 def dom(Atspi, n):
     """Note on `n`, if it's a node in a web page, where it is in its DOM,
     as Chromium's and Firefox's object attributes say, once: "dom", the
@@ -2410,16 +2415,22 @@ def dom(Atspi, n):
     n["_placed"] = True
     el, acc = None, n._acc
     try:
-        while acc is not None and acc.get_role() != Atspi.Role.DOCUMENT_WEB:
-            got = acc.get_attributes() or {}
-            if got.get("tag"):
-                this = {k: got[k] for k in ("tag", "id", "class") if got.get(k)}
-                el = el or this
+        while acc is not None:
+            key = ident(acc)
+            if key not in CLIMBED:
+                got = acc.get_attributes() or {}
+                CLIMBED[key] = (acc.get_role() == Atspi.Role.DOCUMENT_WEB, got.get("tag") and {
+                    k: got[k] for k in ("tag", "id", "class") if got.get(k)}, acc.get_parent())
+            top, this, up = CLIMBED[key]
+            if top:
+                break
+            if this:
+                el = el or dict(this)
                 if "id" in this:
-                    if this is not el:
+                    if this != el:
                         el["in"] = this
                     break
-            acc = acc.get_parent()
+            acc = up
     except Exception:   # gone while we looked
         pass
     text = (n.name or contents(Atspi, n) or "").replace("\ufffc", "").strip()
