@@ -1952,8 +1952,9 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
     cannot = None
     until = time.monotonic() + SEARCH
     for n in measured:
-        if (n._role in texts and n._role not in controls and gtk4_release(n) >= (4, 14)
-                and not trusted and leaf(n) and n.path not in fronts):
+        if (n._role in texts and n._role not in controls and gtk4(n)
+                and gtk4_release(n) >= (4, 14) and not trusted and leaf(n)
+                and n.path not in fronts):
             cannot = cannot or pango_cairo()
             if not cannot and out_of_view(n):
                 hidden.add(n.path)

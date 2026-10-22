@@ -151,6 +151,11 @@
 
 ### Fixed
 
+- `a11y contrast` looked for every toolkit's label text where it's
+  drawn, as it does GTK 4.14 and later's, whose boxes are wrong; GTK 3's,
+  Qt's and Chromium's aren't, so their text is measured in them again.
+  With `--window`, a faint GTK 3 label was said as not found, "GTK None
+  reports where its widgets are wrong".
 - `a11y tabwalk` says a web page's controls Tab never reaches in
   Chromium: Tab lands on the page's document coming in from the
   toolbar, and that counted as reaching all that's in it, so a button

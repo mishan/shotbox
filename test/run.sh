@@ -1133,8 +1133,9 @@ assert (len(faint) == 1 and re.fullmatch('text behind a modal ' + want, faint[0]
   "$sb" run --a11y -- sh -c "'$here/window.py' g3 contrast &
     '$sb' a11y contrast --edges 3 --window g3" > "$tmp/contrast" 2> "$tmp/err"
   st=$?; set -e
-  [ $st = 1 ] && grep -q '/label\[1\]: text ' "$tmp/contrast" \
+  [ $st = 1 ] && grep -q '/label\[1\]: text [0-9]' "$tmp/contrast" \
     && ! grep -q 'toggle button\|/text\[0\]\|/label\[4\]' "$tmp/contrast" \
+    && ! grep -q 'GTK None' "$tmp/contrast" "$tmp/err" \
     && grep -q '/label\[5\]: text too small to measure' "$tmp/contrast" \
     && ! grep '/label\[0\]: ' "$tmp/contrast" | grep -qv 'drawn lighter than its color, #5f5670, which is 6\.5[0-9]:1' \
     && "$sb" run --a11y -- sh -c "'$here/window.py' dot dot & '$sb' a11y contrast --window dot" \
