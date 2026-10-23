@@ -752,9 +752,10 @@ held() {
     '$sb' click 60 60 --window held --hold 0.3; st=\$?; sleep 0.3; exit \$st" || return 1
   awk '{ s = ($1 == "press" ? "+" : "-") $2; if (s != last) printf "%s ", s; last = s }' "$log"
 }
-# How long the key a was held in LOG, in hundredths of a second.
+# How long the key a was held in LOG, in hundredths of a second, from its
+# first press: one held past the repeat delay, on a busy machine, repeats.
 held_for() {
-  awk '$2 == "a" { t[$1] = $3 } END { printf "%d", (t["release"] - t["press"]) * 100 }' "$1"
+  awk '$2 == "a" && !($1 in t) { t[$1] = $3 } END { printf "%d", (t["release"] - t["press"]) * 100 }' "$1"
 }
 want_held="+button1 -button1 +a +d -d -a +button1 -button1 "
 
@@ -783,7 +784,7 @@ down() {
     '$sb' wait window held && '$sb' wait stable --window held &&
     '$sb' click 50 50 --window held && '$sb' key --down w && sleep 0.3 && '$sb' key --up w &&
     '$sb' key --down shift && '$sb' key a && '$sb' key --up shift && sleep 0.3" &&
-    awk '$2 == "w" { t[$1] = $3 } END { exit !(t["release"] - t["press"] >= 0.25) }' "$log" &&
+    awk '$2 == "w" && !($1 in t) { t[$1] = $3 } END { exit !(t["release"] - t["press"] >= 0.25) }' "$log" &&
     grep -q '^press A ' "$log"
 }
 down "$tmp/down.log" && ok "key --down, then --up: held between commands, Shift alone too" || fail "--down, --up: $(tr '\n' ' ' < "$tmp/down.log")"
