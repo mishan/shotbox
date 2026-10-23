@@ -1645,6 +1645,17 @@ if command -v sway >/dev/null && command -v grim >/dev/null; then
     "W=wayland-"*" D= S=$wl/shotbox-"*/run/sway-ipc.*" R=$wl/shotbox-"*) ok "wayland: a sway of its own, and no X" ;;
     *) fail "wayland: the environment: $out" ;;
   esac
+  # The session's cursor theme, written into its home, over a seed's links
+  # out of it: a linked ~/.icons, and a linked cursor. What they point at
+  # stays as it was.
+  mkdir -p "$tmp/icons-out" "$tmp/icons-seed1" "$tmp/icons-seed2/.icons/shotbox-blank/cursors"
+  echo mine > "$tmp/icons-cursor"
+  ln -s "$tmp/icons-out" "$tmp/icons-seed1/.icons"
+  ln -s "$tmp/icons-cursor" "$tmp/icons-seed2/.icons/shotbox-blank/cursors/default"
+  "$sb" run --wayland --seed "$tmp/icons-seed1" -- true && "$sb" run --wayland --seed "$tmp/icons-seed2" -- true \
+    && [ -z "$(ls -A "$tmp/icons-out")" ] && [ "$(cat "$tmp/icons-cursor")" = mine ] \
+    && ok "wayland: the cursor theme doesn't follow a seed's links out" \
+    || fail "wayland: cursor theme over a seed's links: $(ls -A "$tmp/icons-out") $(head -c 4 "$tmp/icons-cursor")"
   "$sb" shoot "$tmp/w1.png" --wayland --window wl-test -- "$win" wl-test >/dev/null
   "$sb" shoot "$tmp/w2.png" --wayland --window wl-test -- "$win" wl-test >/dev/null
   [ "$(identify -format %wx%h "$tmp/w1.png")" = 200x120 ] && cmp -s "$tmp/w1.png" "$tmp/w2.png" \
@@ -2079,7 +2090,7 @@ PY
   if command -v sway >/dev/null && command -v grim >/dev/null && command -v wf-recorder >/dev/null; then
     records --wayland wrec "wayland: record"
     set +e; "$sb" run --wayland -- "$sb" record "$tmp/wrec-p.mp4" --pointer --seconds 1 2> "$tmp/err"; st=$?; set -e
-    [ $st != 0 ] && grep -q "no pointer" "$tmp/err" \
+    [ $st != 0 ] && grep -q "drawn as nothing" "$tmp/err" \
       && ok "wayland: record --pointer, refused saying why" || fail "wayland: record --pointer ($st)"
   else
     [ "${SHOTBOX_WAYLAND-}" = required ] && fail "wayland: record skipped: no sway, grim or wf-recorder" \
