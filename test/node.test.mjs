@@ -14,6 +14,7 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { checks, gif, launch, sealed, serve, until } from '../node/index.mjs';
+import { bumped } from '../node/mutate.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -81,6 +82,32 @@ test('checks count failures and say each one', () =>
     assert.match(said, /^ok {4}one$/m);
     assert.match(said, /^FAIL {2}two$/m);
     assert.match(said, /^skip {2}three$/m);
+});
+
+test('bumped changes the last digit of the first number, keeping its length', () =>
+{
+    for (const [text, want] of [
+        ['Total: 42.50', 'Total: 42.51'],
+        ['1,299', '1,300'],
+        ['1.999,99 €', '2.000,00 €'],
+        ['$0.99 for 3', '$1.00 for 3'],
+        ['1\u00a0299', '1\u00a0300'],
+        ['3 400 items', '4 400 items'],
+        ['3\u00a012 items', '4\u00a012 items'],
+        ['1\u00a02345', '2\u00a02345'],
+        ['0.12345', '0.12346'],
+        ['1\u202f299,50 €', '1\u202f299,51 €'],
+        ["1'299", "1'300"],
+        ['3 of 400', '4 of 400'],
+        ['12:30', '12:31'],
+        ['-3', '-4'],
+        ['v2.0', 'v2.1'],
+        ['9 items', '8 items'],
+        ['$999,999.99', '$999,999.98'],
+        ['no digits', null],
+        ['', null],
+    ])
+        assert.equal(bumped(text), want, text);
 });
 
 test('gif cuts the start and keeps to the palette it is given',
