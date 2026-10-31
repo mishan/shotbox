@@ -669,6 +669,12 @@ st=$?; set -e
   && awk '{ exit !($2 >= 100 && $2 < 200) }' "$tmp/out" \
   && ok "latency: a window 100 ms slow to follow the pointer, measured so" || fail "latency: $(cat "$tmp/out")"
 
+# shotbox mutate's targets and verdicts.
+set +e; python3 "$here/mutate_test.py" > "$tmp/mutate.log" 2>&1; st=$?; set -e
+cat "$tmp/mutate.log"
+fails=$((fails + $(grep -c '^FAIL' "$tmp/mutate.log" || true)))
+[ $st = 0 ] || grep -q "^FAIL" "$tmp/mutate.log" || fail "mutate_test.py: status $st"
+
 #: part input
 # flicker: a square switching green and black every 30 ms flickers, at
 # that; one that blinks every half second, as a caret does, doesn't; one
