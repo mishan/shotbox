@@ -22,7 +22,8 @@
  * and again after a re-render. It finds the target as near as a page can
  * tell; whether it worked is Playwright's to say, by the locator the test
  * would use: once it's made, the test must find nothing by the target
- * showing, then, every half second, and as each page closes.
+ * showing unchanged, then, every half second, and as each page closes.
+ * A dead target must also be used, by the test as a person would.
  */
 
 import fs from 'node:fs';
@@ -31,12 +32,11 @@ import fs from 'node:fs';
    ("42.50" to "42.51", "1,299" to "1,300"), or one lower where a carry
    would add a digit ("9" to "8"), so the text keeps its length and maps
    onto the same characters of the page's text nodes; null with no
-   number. A plain space doesn't join digits, as "3 400 items" are two
-   numbers more often than one. It runs in the page, from its source, so it uses nothing
-   outside itself. */
+   number. It runs in the page, from its source, as does number(), so
+   they use nothing else. */
 export function bumped(text)
 {
-    const m = /\d+(?:[.,:]\d+|['\u00a0\u2009\u202f]\d{3}(?!\d))*/.exec(text);
+    const m = number(text);
 
     if (!m)
         return null;
@@ -56,8 +56,15 @@ export function bumped(text)
     return text.slice(0, m.index) + digits.join('') + text.slice(m.index + m[0].length);
 }
 
+/* The first number in `text`, as a match. A plain space doesn't join
+   digits, as "3 400 items" are two numbers more often than one. */
+function number (text)
+{
+    return /\d+(?:[.,:]\d+|['\u00a0\u2009\u202f]\d{3}(?!\d))*/.exec(text);
+}
+
 const BINDING = '__shotboxMutation';
-const KINDS = new Set(['hide']);
+const KINDS = new Set(['hide', 'dead', 'number']);
 /* More undos than this before a frame is drawn is a page fighting the
    change, and what the test does then says nothing of it. One a frame is
    a page drawing itself, as React does, which the change is made again
@@ -75,7 +82,8 @@ const EVERY = 500;
 /* As long as one of those looks may take, which a closing page waits
    for. */
 const GLANCE = 3000;
-const SHOWN = 'the test could still find it, showing';
+const SHOWN = 'the test could still find it unchanged';
+const UNUSED = 'the change was made, and the test never used the target';
 const WRAPPED = Symbol('shotbox.mutation');
 
 /* What this process has found, for all its contexts, as a test runner
@@ -132,11 +140,14 @@ export async function mutated (context)
     {
         if (!bad && !spoiled() && await look(pages, GLANCE) === SHOWN && !spoiled())
         {
-            Object.assign(report, { proven: false, shown: true, why: SHOWN });
+            Object.assign(report, { proven: false, shown: true, why: unfit || SHOWN });
             write(out);
         }
     };
-    let proving = null, auditing = null, bad = false;
+    /* Whether the look on making it found nothing unchanged, and whether
+       the test has acted on a dead target: one it never used says
+       nothing of a test. */
+    let proving = null, auditing = null, bad = false, clear = false, used = false, unfit = '';
     /* One look at a time, and at close only where none is under way. */
     const done = (pages) => async () =>
     {
@@ -161,6 +172,20 @@ export async function mutated (context)
             report.seen[said.seen] = true;
         else if (said.fought)
             Object.assign(report, { proven: false, fought: true, why: FOUGHT });
+        else if (said.unfit)
+        {
+            unfit = said.unfit;
+            if (report.made || spoiled())
+                return;
+            report.why = unfit;
+        }
+        else if (said.used)
+        {
+            used = true;
+            if (!clear || spoiled() || report.proven)
+                return;
+            Object.assign(report, { proven: true, why: '' });
+        }
         else if (spoiled() || report.proven || proving)
             return;
         else if (said.bad)
@@ -178,19 +203,24 @@ export async function mutated (context)
 
             if (spoiled())
                 return;
-            Object.assign(report, why ? { why } : { proven: true, why: '' });
+            clear = !why;
+            Object.assign(report, why ? { why } : spec.kind === 'dead' && !used ? { why: UNUSED }
+                                                                                : { proven: true, why: '' });
         }
         write(out);
     });
-    await context.addInitScript(inPage, { spec, binding: BINDING, undos: UNDOS });
+    const script = `(() => { ${number} ${bumped}
+        (${inPage})(${JSON.stringify({ spec, binding: BINDING, undos: UNDOS })}, number, bumped); })()`;
+
+    await context.addInitScript(script);
     /* A page made before, as a test runner's own page is, until it next
        loads one. */
     for (const frame of context.pages().flatMap((p) => p.frames()))
-        await frame.evaluate(inPage, { spec, binding: BINDING, undos: UNDOS }).catch(() => {});
+        await frame.evaluate(script).catch(() => {});
 }
 
 /* Whether any frame of `pages` shows what the test could find by the
-   target, by the locator it would use. */
+   target, by the locator it would use, that wasn't changed. */
 async function showing (pages, t)
 {
     const name = t.re === undefined ? t.name : new RegExp(`^(?:${t.re})$`);
@@ -200,7 +230,8 @@ async function showing (pages, t)
         const found = t.by === 'role' ? frame.getByRole(t.role, { name, exact: true })
             : t.by === 'text' ? frame.getByText(name, { exact: true }) : frame.locator(t.css);
 
-        if (await found.filter({ visible: true }).count())
+        if (await found.filter({ visible: true }).evaluateAll((els) =>
+            els.some((el) => !globalThis[Symbol.for('shotbox.mutation')]?.(el))))
             return true;
     }
     return false;
@@ -232,7 +263,7 @@ function write (out)
 
 /* The page's half, run in every frame from its source: it can use
    nothing outside itself. */
-function inPage ({ spec, binding, undos })
+function inPage ({ spec, binding, undos }, number, bumped)
 {
     const key = Symbol.for('shotbox.mutation');
 
@@ -244,15 +275,13 @@ function inPage ({ spec, binding, undos })
     const said = (m) => Promise.resolve().then(() => send(m)).catch(() => {});
     let fought = false;
 
-    globalThis[key] = true;
-
     /* The role, name and text the page gives it, as near as the page can
        tell: what Chromium gives it is only read through CDP. */
     const INPUTS = { button: 'button', submit: 'button', reset: 'button', image: 'button',
                      checkbox: 'checkbox', radio: 'radio', range: 'slider', number: 'spinbutton',
                      search: 'searchbox' };
     const DEFAULTS = { submit: 'Submit', reset: 'Reset' };
-    const FIELDS = new Set(['input', 'select', 'textarea']);
+    const FIELDS = new Set(['input', 'select', 'textarea', 'button', 'meter', 'output', 'progress']);
     const TAGS = { button: 'button', textarea: 'textbox', nav: 'navigation', main: 'main',
                    dialog: 'dialog', ul: 'list', ol: 'list', li: 'listitem', option: 'option',
                    table: 'table', tr: 'row', td: 'cell', summary: 'button', section: 'region',
@@ -287,14 +316,16 @@ function inPage ({ spec, binding, undos })
 
         return style.display === 'none' || style.visibility === 'hidden';
     };
+    const showsText = (c) => c.nodeType === Node.ELEMENT_NODE && !UNSAID.has(c.localName) && !c.hidden
+                             && !unshown(c);
+    const spoken = (c) => showsText(c) && c.getAttribute('aria-hidden') !== 'true';
     /* Its text, less what is hidden; for a name, with what its images
        and labeled parts are called. */
     const words = (n, named) => [...n.childNodes].map((c) =>
     {
         if (c.nodeType === Node.TEXT_NODE)
             return c.data;
-        if (c.nodeType !== Node.ELEMENT_NODE || UNSAID.has(c.localName) || c.hidden
-            || c.getAttribute('aria-hidden') === 'true' || unshown(c))
+        if (!spoken(c))
             return '';
         if (named && c.hasAttribute('aria-label'))
             return ` ${c.getAttribute('aria-label')} `;
@@ -378,18 +409,94 @@ function inPage ({ spec, binding, undos })
                                                               : !live.delete(c));
     const hidden = (el) => el.style.getPropertyValue('display') === 'none'
                            && el.style.getPropertyPriority('display') === 'important';
-    /* Without a transition, which would keep it showing a while. */
-    const hide = (el) =>
+    /* The text nodes of what it shows, aria-hidden or not, and what it is
+       called, for a number. */
+    const texts = (n) => [...n.childNodes].flatMap((c) => c.nodeType === Node.TEXT_NODE ? [c]
+                                                        : showsText(c) ? texts(c) : []);
+    const shown = (el) => texts(el).map((t) => t.data).join('');
+    const wrote = new WeakMap();
+    /* What the page has written over, of what was made: each write made
+       is owed a record of its own, which isn't the page's. */
+    const owed = new Map(), rewritten = new WeakSet();
+    const write = (n, f) =>
     {
-        el.style.setProperty('transition', 'none', 'important');
-        el.style.setProperty('display', 'none', 'important');
+        owed.set(n, (owed.get(n) ?? 0) + 1);
+        f();
     };
+    const over = (was, nodes) => was.nodes.some((t) => rewritten.has(t) || !nodes.includes(t));
+    /* Playwright sets these first, and only then sends their events. */
+    const SET = 'select, input:is([type=color], [type=date], [type=datetime-local], [type=month], '
+                + '[type=range], [type=time], [type=week], [type=file])';
+    /* Each kind's change, whether the page has undone it, and why it
+       can't be made, where it can't. */
+    const KINDS = {
+        hide: {
+            /* Without a transition, which would keep it showing a while. */
+            make: (el) =>
+            {
+                el.style.setProperty('transition', 'none', 'important');
+                el.style.setProperty('display', 'none', 'important');
+            },
+            undone: (el) => !hidden(el),
+            unfit: () => '',
+        },
+        dead: {
+            make: () => {},
+            undone: () => false,
+            unfit: (el) => el.matches(SET)
+                ? 'a test sets its value before any event, which a dead change can\'t stop' : '',
+        },
+        /* Each text node keeps its length, so the number shows in the same
+           places, and its name says the same. Made again where the page
+           has written over what was made, even with what it was made, and
+           not where it only changes what is around it. */
+        number: {
+            make: (el) =>
+            {
+                const was = wrote.get(el);
+                const nodes = texts(el);
+                const text = nodes.map((t) => t.data).join('');
+                const now = (!was?.nodes || over(was, nodes)) && bumped(text);
+                const label = el.getAttribute('aria-label');
+                const named = label && (!was || rewritten.has(el) || label !== was.label) && bumped(label);
+                const mine = [];
+                let at = 0;
+
+                for (const t of now ? nodes : [])
+                {
+                    const s = now.slice(at, at + t.data.length);
+
+                    at += t.data.length;
+                    if (s !== t.data)
+                    {
+                        write(t, () => t.data = s);
+                        mine.push(t);
+                    }
+                }
+                if (named)
+                    write(el, () => el.setAttribute('aria-label', named));
+                [el, ...nodes].forEach((n) => rewritten.delete(n));
+                wrote.set(el, { nodes: now ? mine : was?.nodes, text: shown(el),
+                                label: el.getAttribute('aria-label') });
+            },
+            undone: (el) =>
+            {
+                const was = wrote.get(el);
+
+                return was.text !== shown(el) || was.label !== el.getAttribute('aria-label')
+                       || rewritten.has(el) || !!was.nodes && over(was, texts(el));
+            },
+            unfit: (el) => bumped(shown(el)) || bumped(el.getAttribute('aria-label') ?? '') ? ''
+                : 'its text and aria-label have no number to change',
+        },
+    };
+    const kind = KINDS[spec.kind];
     /* Counted until a frame is drawn, or for a second where none is, as
        in a frame out of sight. */
     let undone = new Map(), since = performance.now();
     const again = (el) =>
     {
-        if (hidden(el))
+        if (!kind.undone(el))
             return;
         if (performance.now() - since > 1000)
             [undone, since] = [new Map(), performance.now()];
@@ -400,11 +507,23 @@ function inPage ({ spec, binding, undos })
             said({ fought: true });
             return;
         }
-        hide(el);
+        kind.make(el);
     };
     const change = (el) =>
     {
-        hide(el);
+        const why = kind.unfit(el);
+
+        if (why)
+            return said({ unfit: why });
+        /* A number by what the test finds it by: its name, or the text it
+           shows. */
+        const t = spec.target;
+        const by = spec.kind === 'number' && { role: () => name(el, t.role), text: () => shown(el) }[t.by];
+        const was = by && by();
+
+        kind.make(el);
+        if (by && by() === was)
+            return said({ unfit: `what the test finds it by doesn't show the number changed` });
         changed.add(el);
         live.add(el);
 
@@ -492,10 +611,26 @@ function inPage ({ spec, binding, undos })
     const NAMING = new Set(['hidden', 'aria-hidden', 'aria-label', 'alt']);
     const selectors = targets.filter((t, i) => t.by === 'css' && matches[i] !== nothing)
                              .map((t) => t.css);
+    /* Which records are the page's, all of them before any is acted on,
+       as what is made on one would be owed the record of a later one. */
+    const theirs = (r) =>
+    {
+        if (r.type !== 'characterData' && r.attributeName !== 'aria-label')
+            return true;
+        const n = owed.get(r.target);
+
+        if (!n)
+            rewritten.add(r.target);
+        else if (n > 1)
+            owed.set(r.target, n - 1);
+        else
+            owed.delete(r.target);
+        return !n;
+    };
     const observer = new MutationObserver((records) =>
     {
         looked = new Set();
-        for (const r of records)
+        for (const r of records.filter(theirs))
         {
             if (fought)
                 return;
@@ -528,6 +663,74 @@ function inPage ({ spec, binding, undos })
     for (const type of ['beforetoggle', 'mouseover', 'mouseout', 'focusin', 'focusout', 'change',
                         'transitionend', 'animationend'])
         addEventListener(type, () => queueMicrotask(recheck), true);
+    /* What a dead target does, stopped first, on the window, before the
+       page's own listeners: what reaches it from the pointer, touch or
+       keys, less what is the controls' it holds, as the fields of a dead
+       form still take typing. But for what Tab, Shift and the like and
+       the wheel do, the focus a press gives it, a drop it won't take,
+       and a pointer passing over it. What the test does to it, as a
+       person would, counted, as is a submit the test set off. */
+    const ACTS = new Set(['pointerdown', 'mousedown', 'touchstart', 'click', 'dblclick', 'auxclick',
+                          'keydown', 'beforeinput', 'drop']);
+    const KEPT = new Set(['pointerdown', 'mousedown', 'wheel', 'dragenter', 'dragover']);
+    const PASSING = new Set(['Tab', 'Shift', 'Control', 'Alt', 'Meta']);
+    const WIDGETS = ['a[href]', 'area[href]', 'button', 'input', 'select', 'textarea', 'summary',
+                     ...['button', 'link', 'checkbox', 'radio', 'switch', 'tab', 'menuitem',
+                         'menuitemcheckbox', 'menuitemradio', 'option', 'slider', 'spinbutton',
+                         'textbox', 'searchbox', 'combobox', 'treeitem'].map((r) => `[role=${r}]`)].join();
+    const CONTROLS = [WIDGETS, 'label', '[contenteditable]:not([contenteditable=false])',
+                      '[tabindex]:not([tabindex^="-"])'].join();
+    /* A custom element may be a control by what only it knows: its
+       internals, or a closed shadow root. */
+    const control = (n) => n.matches?.(CONTROLS) || n.localName?.includes('-');
+    /* What dies: the widget that holds it, as drawn, through slots, as
+       the text in a button names the button; else itself. */
+    const holder = (el) =>
+    {
+        for (let c = el; c; c = c.assignedSlot ?? up(c))
+            if (c.matches?.(WIDGETS))
+                return c;
+        return el;
+    };
+    let used = false, inside = false;
+
+    for (const type of spec.kind === 'dead' ? [...ACTS, 'pointerup', 'pointercancel', 'mouseup',
+        'touchend', 'touchmove', 'touchcancel', 'keyup', 'keypress', 'contextmenu', 'dragstart',
+        'dragenter', 'dragover', 'wheel', 'submit'] : [])
+        addEventListener(type, (e) =>
+        {
+            const path = e.composedPath();
+            const act = e.isTrusted && ACTS.has(e.type) && !PASSING.has(e.key);
+
+            /* Through what dies, and whether it is its own: all of a widget
+               is, and of anything else, what no control it holds takes. */
+            let through = false, dead = false;
+
+            for (const el of live)
+            {
+                const d = changed.has(el) && holder(el), at = d ? path.indexOf(d) : -1;
+
+                through ||= at >= 0;
+                dead ||= at >= 0 && (d.matches?.(WIDGETS) || !path.slice(0, at).some(control));
+            }
+            /* Until the page's own next task or frame. */
+            if (act && through)
+            {
+                inside = true;
+                setTimeout(() => inside = false);
+                requestAnimationFrame(() => inside = false);
+            }
+            if (!dead)
+                return;
+            if (!KEPT.has(e.type) && !PASSING.has(e.key))
+                e.preventDefault();
+            e.stopImmediatePropagation();
+            if ((act || e.type === 'submit' && inside) && !used)
+            {
+                used = true;
+                said({ used: true });
+            }
+        }, { capture: true, passive: false });
     const frame = () =>
     {
         [undone, since] = [new Map(), performance.now()];
@@ -550,6 +753,9 @@ function inPage ({ spec, binding, undos })
         }
         return root;
     };
+    /* Which elements were changed, for Playwright to tell a copy the page
+       missed from what it changed. */
+    globalThis[key] = (el) => changed.has(el);
     watch(document);
     /* What a page made before mutated() has already. */
     scan(document);
