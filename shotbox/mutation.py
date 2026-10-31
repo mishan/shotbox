@@ -3,10 +3,18 @@ tests, to find a test that fails on a change that shouldn't matter
 (brittle) or passes on one that should (blind).
 """
 
+import dataclasses
+import itertools
 import json
 import re
+import shutil
+import subprocess
+import tempfile
+import time
+from pathlib import Path
 
 from .screen import SessionError
+from .session import Session, kill_group
 
 # Whether each kind of change should fail a test that checks what it's for.
 MATTERS = {"size": False, "move": False, "hide": True, "dead": True, "number": True}
@@ -52,3 +60,173 @@ def verdict(kind, ended, proven, confirmed=None):
     if ended == "pass":
         return "robust"
     return "BRITTLE" if ended == "fail" and confirmed else "inconclusive"
+
+
+# The sizes `size` runs the page at, one run each.
+SIZES = ((1024, 768), (1920, 1080))
+ON_TARGETS = ("move", "hide", "dead", "number")
+
+
+class Unusable(SessionError):
+    """The clean runs say nothing can be learned from changed ones."""
+
+
+@dataclasses.dataclass
+class Run:
+    label: str
+    spec: dict
+    ended: str = ""
+    seconds: float = 0.0
+    proven: bool = False
+    why: str = ""
+    verdict: str = ""
+
+
+@dataclasses.dataclass
+class MutationReport:
+    runs: list
+    clean: list
+    control: str
+    suspect: bool
+    strict: bool = False
+
+    def _with(self, *verdicts):
+        return [r for r in self.runs if r.verdict in verdicts]
+
+    @property
+    def brittle_runs(self):
+        return self._with("BRITTLE")
+
+    @property
+    def blind_runs(self):
+        return self._with("BLIND")
+
+    @property
+    def unapplied_runs(self):
+        return self._with("UNAPPLIED")
+
+    @property
+    def status(self):
+        """0 with nothing brittle or blind, else 1; with `strict`,
+        UNAPPLIED counts too."""
+        return int(bool(self.brittle_runs or self.blind_runs or self.strict and self.unapplied_runs))
+
+
+def plan(targets, kinds, only=None):
+    """The changed runs, in order: the sizes, then each target's kinds;
+    with `only`, the one it names."""
+    bad = [k for k in kinds if k not in MATTERS]
+    if bad:
+        raise SessionError(f"no kind {bad[0]!r}: they are {', '.join(MATTERS)}")
+    runs = [Run(f"size {w}x{h}", {"kind": "size", "screen": [w, h]})
+            for w, h in SIZES if "size" in kinds]
+    for spec in targets:
+        runs += [Run(f"{k} {spec}", {"kind": k, "target": target(spec)})
+                 for k in ON_TARGETS if k in kinds]
+    if only is not None:
+        runs = [r for r in runs if r.label == only]
+        if not runs:
+            raise SessionError(f"{only!r} isn't one of the runs these targets and kinds make")
+    if not runs:
+        raise SessionError("nothing to change: give a --target, or size in --kinds")
+    return runs
+
+
+def mutate(cmd, targets, kinds=None, confirm=1, timeout=None, only=None, save=None,
+           strict=False, out=None, _new_session=None, **session_options):
+    """Run `cmd`, a test that calls the page helper `mutated()`, twice
+    clean, then once for each change to each of `targets`, each in a
+    session of its own (`session_options`, as Session takes them), and
+    once more clean at the end; a MutationReport. Raises Unusable if the
+    clean runs fail, write no report, or never find a target."""
+    kinds = kinds.split(",") if isinstance(kinds, str) else kinds
+    runs = plan(targets, list(MATTERS) if kinds is None else kinds, only)
+    if save and Path(save).exists() and any(Path(save).iterdir()):
+        raise SessionError(f"--save {save}: it has files in it already, which a run's "
+                           "own could be mistaken for")
+    say = (lambda s: print(s, file=out, flush=True)) if out else (lambda s: None)
+    new_session = _new_session or (lambda: Session(**session_options))
+    # Absolute, for a test that changes directory before it reports.
+    work = Path(save).resolve() if save else Path(tempfile.mkdtemp(prefix="shotbox-mutate-"))
+    count = itertools.count(1)
+    clean = {"kind": None, "targets": [target(t) for t in targets]}
+
+    def go(label, spec, limit):
+        n = next(count)
+        where = work / f"{n:02d}-{re.sub(r'[^A-Za-z0-9.]+', '-', label).strip('-')}"
+        where.mkdir(parents=True)
+        report = where / "report.json"
+        with new_session() as s:
+            s.env.update(SHOTBOX_MUTATION=json.dumps(spec), SHOTBOX_MUTATION_REPORT=str(report))
+            start = time.monotonic()
+            proc = s.spawn(cmd, log=where / "log")
+            try:
+                ended = "pass" if proc.wait(timeout=limit) == 0 else "fail"
+            except subprocess.TimeoutExpired:
+                ended = "timeout"
+            finally:
+                took = time.monotonic() - start
+                kill_group(proc)
+        try:
+            got = json.loads(report.read_text())
+        except (OSError, ValueError):
+            got = None
+        return ended, took, got if isinstance(got, dict) else None, where / "log"
+
+    try:
+        say(f"shotbox mutate: {len(runs)} run{'s' * (len(runs) != 1)}, plus 3 clean")
+        firsts = [go("clean", clean, timeout) for _ in range(2)]
+        say("clean      " + "  ".join(e for e, *_ in firsts)
+            + f"  ({max(t for _, t, *_ in firsts):.1f} s)")
+        for ended, _, got, log in firsts:
+            if ended != "pass":
+                raise Unusable("the test fails with no change, so changes can't be judged"
+                               + tail(log))
+            if got is None:
+                raise Unusable("the test never called mutated(), or it wrote no report: "
+                               "with no proof of what changed, nothing can be judged")
+        for i, spec in enumerate(targets):
+            if not all(isinstance(g.get("seen"), list) and g["seen"][i:i + 1] == [True]
+                       for _, _, g, _ in firsts):
+                raise Unusable(f"the clean runs didn't both find {spec}")
+        limit = timeout or max(30.0, 3 * max(t for _, t, *_ in firsts))
+        for r in runs:
+            r.ended, r.seconds, got, _ = go(r.label, r.spec, limit)
+            r.proven, r.why = bool(got and got.get("proven")), str((got or {}).get("why", ""))
+            confirmed, notes = None, [r.why] if r.why else []
+            if r.ended == "fail" and r.proven and not MATTERS[r.spec["kind"]]:
+                again = [go(r.label, r.spec, limit) for _ in range(confirm)]
+                notes += [f"rerun {said(e)}" for e, *_ in again]
+                confirmed = all(e == "fail" and g and g.get("proven") for e, _, g, _ in again)
+                if confirmed:
+                    e = go("clean", clean, limit)[0]
+                    notes.append(f"clean rerun {said(e)}")
+                    confirmed = e == "pass"
+            r.verdict = verdict(r.spec["kind"], r.ended, r.proven, confirmed)
+            say(f"{r.label:<30}  {said(r.ended):<7}  {r.verdict}"
+                + (f"  ({', '.join(notes)})" if notes else ""))
+        control = go("control", clean, limit)[0]
+        rep = MutationReport(runs, [e for e, *_ in firsts], control, control != "pass", strict)
+        say(f"control    {said(control)}"
+            + ("  (findings are suspect: something outside the session, files or "
+               "the network, changed between runs)" if rep.suspect else ""))
+        say(f"{len(rep.brittle_runs) + len(rep.blind_runs)} brittle or blind of {len(runs)}; "
+            f"{len(rep.unapplied_runs)} unapplied")
+        return rep
+    finally:
+        if not save:
+            shutil.rmtree(work, ignore_errors=True)
+
+
+def said(ended):
+    """How a run ended, as the report says it: what went wrong in capitals."""
+    return ended if ended == "pass" else ended.upper()
+
+
+def tail(path, n=10):
+    """What a log ends with, said after a colon, or that it's empty."""
+    try:
+        lines = Path(path).read_text(errors="replace").splitlines()[-n:]
+    except OSError:
+        lines = []
+    return ":\n" + "\n".join(lines) if lines else ", and says nothing"
