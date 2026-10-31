@@ -112,6 +112,23 @@ class MutationReport:
         return int(bool(self.brittle_runs or self.blind_runs or self.strict and self.unapplied_runs))
 
 
+def merged(reports):
+    """The report of a test whose processes each wrote one: a target any
+    saw was seen, and a change any proved is proven, unless one found the
+    page fighting it; else the why of one that made the change."""
+    reports = [r for r in reports if isinstance(r, dict)]
+    if not reports:
+        return None
+    if all(isinstance(r.get("seen"), list) for r in reports):
+        return {"seen": [any(i < len(r["seen"]) and r["seen"][i] is True for r in reports)
+                         for i in range(max(len(r["seen"]) for r in reports))]}
+    for mark in ("fought", "proven", "made"):
+        for r in reports:
+            if r.get(mark) is True:
+                return r
+    return reports[0]
+
+
 def plan(targets, kinds, only=None):
     """The changed runs, in order: the sizes, then each target's kinds;
     with `only`, the one it names."""
@@ -155,9 +172,10 @@ def mutate(cmd, targets, kinds=None, confirm=1, timeout=None, only=None, save=No
         n = next(count)
         where = work / f"{n:02d}-{re.sub(r'[^A-Za-z0-9.]+', '-', label).strip('-')}"
         where.mkdir(parents=True)
-        report = where / "report.json"
+        reports = where / "reports"
+        reports.mkdir()
         with new_session() as s:
-            s.env.update(SHOTBOX_MUTATION=json.dumps(spec), SHOTBOX_MUTATION_REPORT=str(report))
+            s.env.update(SHOTBOX_MUTATION=json.dumps(spec), SHOTBOX_MUTATION_REPORT=str(reports))
             start = time.monotonic()
             proc = s.spawn(cmd, log=where / "log")
             try:
@@ -167,11 +185,13 @@ def mutate(cmd, targets, kinds=None, confirm=1, timeout=None, only=None, save=No
             finally:
                 took = time.monotonic() - start
                 kill_group(proc)
-        try:
-            got = json.loads(report.read_text())
-        except (OSError, ValueError):
-            got = None
-        return ended, took, got if isinstance(got, dict) else None, where / "log"
+        got = []
+        for p in sorted(reports.iterdir()):
+            try:
+                got.append(json.loads(p.read_text()))
+            except (OSError, ValueError):
+                pass
+        return ended, took, merged(got), where / "log"
 
     try:
         say(f"shotbox mutate: {len(runs)} run{'s' * (len(runs) != 1)}, plus 3 clean")

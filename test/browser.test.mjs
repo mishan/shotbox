@@ -17,7 +17,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 
-import { dress, film, frames, gif, pageErrors, sealed, steady } from '../node/index.mjs';
+import { dress, film, frames, gif, mutated, pageErrors, sealed, steady, until } from '../node/index.mjs';
 
 let chromium = null, why = false;
 
@@ -182,6 +182,335 @@ test('pageErrors hears both a throw and a console.error', { skip: why }, async (
     finally
     {
         await page.close();
+    }
+});
+
+/* Pages for `mutated`, a context each, on a host of their own under a
+   strict CSP and Trusted Types, their scripts let in by nonce. Each but
+   the last is closed as soon as it has loaded, as a test that is quickly
+   done would; on the last, what the run's report says once `done` is,
+   or a second and a half on, and what `look` sees of it then. */
+const CSP = "default-src 'none'; script-src 'nonce-n'; style-src 'none'; " +
+            "frame-src http://b.test; require-trusted-types-for 'script'; trusted-types 'none'";
+
+async function mutation (spec, pages, { frame = '', done = (r) => r.proven, look = () => null,
+                                        on = browser } = {})
+{
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'shotbox-test-'));
+    const read = async () => JSON.parse(await fs.readFile(path.join(dir, `${process.pid}.json`), 'utf8')
+                                                .catch(() => 'null'));
+    const errors = [];
+
+    Object.assign(process.env, { SHOTBOX_MUTATION: JSON.stringify(spec),
+                                 SHOTBOX_MUTATION_REPORT: dir });
+    try
+    {
+        for (const [i, html] of [pages].flat().entries())
+        {
+            const context = await on.newContext();
+
+            try
+            {
+                await context.route(/^http:\/\/[ab]\.test\//, (r) =>
+                    r.request().url().startsWith('http://a')
+                        ? r.fulfill({ contentType: 'text/html', body: html,
+                                      headers: { 'Content-Security-Policy': CSP } })
+                        : r.fulfill({ contentType: 'text/html', body: frame }));
+                await mutated(context);
+
+                const page = await context.newPage();
+
+                pageErrors(page, errors);
+                await page.goto('http://a.test/');
+                if (i < [pages].flat().length - 1)
+                {
+                    await page.close();
+                    continue;
+                }
+                await until(async () => done(await read() ?? {}), 1500);
+                const saw = await look(page);
+
+                /* Closed, as the report is only done then. */
+                await context.close();
+                return { report: await read(), errors, saw };
+            }
+            finally
+            {
+                await context.close();
+            }
+        }
+    }
+    finally
+    {
+        delete process.env.SHOTBOX_MUTATION;
+        delete process.env.SHOTBOX_MUTATION_REPORT;
+        await fs.rm(dir, { recursive: true, force: true });
+    }
+}
+
+/* How often, sampled every 20 ms for a second, the test could find a
+   button "Pay" showing, as a test would look for it. */
+const seenBy = async (page) =>
+{
+    let seen = 0;
+
+    for (let i = 0; i < 50; i++, await page.waitForTimeout(20))
+        seen += await page.getByRole('button', { name: 'Pay', exact: true }).filter({ visible: true }).count();
+    return seen;
+};
+
+/* How many of the elements `css` finds are showing, in every frame. */
+const showing = async (page, css) =>
+    (await Promise.all(page.frames().map((f) => f.locator(`${css} >> visible=true`).count())))
+        .reduce((a, b) => a + b);
+
+const PAY = '<button>Pay</button>';
+const TOTAL = '<div><p>Total: <b>42.50</b></p><button data-kept aria-label="Other"></button></div>';
+const FRAME = '<iframe src="http://b.test/"></iframe>';
+const pay = { by: 'role', role: 'button', name: 'Pay' };
+const script = (js) => `<script nonce="n">${js}</script>`;
+const later = (js) => script(`setTimeout(() => { ${js} }, 100)`);
+const shadow = (js) => '<div id="host"></div>' + script(`const fill = () =>
+    { const b = document.createElement('button'); b.textContent = 'Pay';
+      document.getElementById('host').attachShadow({ mode: 'open' }).append(b); }; ${js}`);
+
+test('mutated hides the target, proven by the locator the test would use: by role, name, regex, text and selector, not its hidden twin, before the page\'s own scripts, as it remounts, in a shadow root and a cross-origin frame, for a test that closes it at once',
+     { skip: why }, async () =>
+{
+    const cases = [
+        ['a role and its name, not its hidden twin', pay, `<button hidden>Pay</button>${PAY}`],
+        ['a role and a regex', { by: 'role', role: 'button', re: 'P.y' }, PAY],
+        ['a name that is only part of another\'s', pay, `${PAY}<button data-kept>Pay later</button>`],
+        ['text, the nearest element all of it is in', { by: 'text', name: 'Total: 42.50' }, TOTAL],
+        ['text by regex', { by: 'text', re: 'Total: .*' }, TOTAL],
+        ['a selector', { by: 'css', css: '#pay' }, '<button id="pay">Go</button>'],
+        ['a name from aria-label', { by: 'role', role: 'link', name: 'Pay' },
+         '<a href="#" aria-label="Pay">$</a>'],
+        ['a name from aria-labelledby', { by: 'role', role: 'textbox', name: 'Card number' },
+         '<span id="l">Card <i>number</i></span><input aria-labelledby="l">'],
+        ['a name from its label', { by: 'role', role: 'checkbox', name: 'Save it' },
+         '<label for="c">Save it</label><input type="checkbox" id="c">'],
+        ['a name from alt', { by: 'role', role: 'img', name: 'Logo' },
+         '<img alt="Logo" width="10" height="10">'],
+        ['a name from what is in it, less what is hidden', pay,
+         '<button><img alt="Pay" width="10" height="10"><span hidden>now</span></button>'],
+        ['a name given later to what is in it', pay, '<button><span></span></button>' + script(`
+             setTimeout(() => document.querySelector('span').setAttribute('aria-label', 'Pay'), 100)`)],
+        ['a name from its value', { by: 'role', role: 'button', name: 'Send' },
+         '<input type="submit" value="Send">'],
+        ['a name from title', { by: 'role', role: 'textbox', name: 'Email' },
+         '<input title="Email">'],
+        ['a name from placeholder', { by: 'role', role: 'textbox', name: 'Email' },
+         '<input placeholder="Email">'],
+        ['a name a submit button has by default', { by: 'role', role: 'button', name: 'Submit' },
+         '<input type="submit">'],
+        ['a name less text hidden by its style', pay, '<p>Due</p>' + script(`const b = document.createElement('button');
+             const s = document.createElement('span'); s.textContent = '!'; s.style.display = 'none';
+             b.append('Pay', s); document.body.append(b)`)],
+        ['a region', { by: 'role', role: 'region', name: 'Cart' }, '<section aria-label="Cart">x</section>'],
+        ['a row header', { by: 'role', role: 'rowheader', name: 'Total' },
+         '<table><tr><th scope="row">Total</th><td>1</td></tr></table>'],
+        ['a selector that matches once a box is ticked', { by: 'css', css: '#c:checked + #pay' },
+         `<input type="checkbox" id="c"><button id="pay">Go</button>${
+             later("document.getElementById('c').checked = true")}`],
+        ['before the page\'s scripts run', pay,
+         PAY + script('document.title = getComputedStyle(document.querySelector("button")).display')],
+        ['as it remounts every 20 ms', pay, PAY + script(`setInterval(() =>
+             { const b = document.createElement('button'); b.textContent = 'Pay';
+               document.querySelector('button').replaceWith(b); }, 20)`)],
+        ['in an open shadow root', pay, shadow('fill()')],
+        ['in an open shadow root filled after it has loaded', pay, shadow('setTimeout(fill, 100)')],
+        ['in a shadow root filled before its host is added', pay, later(`
+             const h = document.createElement('div'), b = document.createElement('button');
+             b.textContent = 'Pay'; h.attachShadow({ mode: 'open' }).append(b);
+             setTimeout(() => document.body.append(h), 100)`)],
+        ['in a declarative shadow root', pay, `<div><template shadowrootmode="open">${PAY}</template></div>`],
+        ['shown by a popover again and again, never where the test could find it', pay,
+         script(`setInterval(() => { document.querySelectorAll('[popover]').forEach((p) => p.remove());
+             const d = document.createElement('div'), b = document.createElement('button');
+             d.popover = 'manual'; b.textContent = 'Pay'; d.append(b); document.body.append(d);
+             setTimeout(() => d.isConnected && d.showPopover(), 30); }, 300)`)],
+        ['shown by a popover, with nothing in the page changing', pay,
+         `<div popover id="p">${PAY}</div>${later("document.getElementById('p').showPopover()")}`],
+        ['that would fade out', pay, later(`const b = document.createElement('button');
+             b.textContent = 'Pay'; b.style.transition = 'display 1s allow-discrete';
+             document.body.append(b)`)],
+        ['drawn again each frame', pay, PAY + script(`const b = document.querySelector('button');
+             const f = () => { b.style.removeProperty('display'); requestAnimationFrame(f); }; f()`)],
+        ['drawn again every 200 ms, out of sight in a frame', pay,
+         FRAME + script("document.querySelector('iframe').style.marginTop = '3000px'"),
+         PAY + `<script>const b = document.querySelector('button');
+             setInterval(() => b.style.removeProperty('display'), 200)</script>`],
+        ['drawn again each frame, many of it', pay, PAY.repeat(12) + script(`
+             const f = () => { for (const b of document.querySelectorAll('button'))
+                 b.style.removeProperty('display'); requestAnimationFrame(f); }; f()`)],
+        ['shown later in what held it hidden', pay, `<div hidden><button><span>Pay</span></button></div>${
+             later("document.querySelector('div').hidden = false")}`],
+        ['a selector that comes to match what holds a match', { by: 'css', css: '.t' },
+         `<div id="o"><span class="t">Pay</span> more</div>${
+             later("document.getElementById('o').className = 't'")}`],
+        ['text that is only part of other text', { by: 'text', name: 'Pay' },
+         '<button>Pay</button><p>Pay later</p>'],
+        ['text that is also an option not shown', { by: 'text', name: 'Monthly' },
+         '<button>Monthly</button><select><option>Yearly</option><option>Monthly</option></select>'],
+        ['text under aria-hidden, which a test finds by text all the same', { by: 'text', name: 'Due' },
+         '<div aria-hidden="true"><p>Due</p></div>'],
+        ['the page removes it after', pay, PAY + script('document.querySelector("button").remove()')],
+        ['the page hides it from the accessible tree after', pay,
+         `<div>${PAY}</div>` + script("document.querySelector('div').setAttribute('aria-hidden', 'true')")],
+        ['touched many times at once', pay, PAY + script(`const b = document.querySelector('button');
+             (async () => { for (let i = 0; i < 20; i++)
+                 { b.dataset.n = i; await new Promise((ok) => queueMicrotask(ok)); } })()`)],
+        ['a selector that matches once what holds it changes', { by: 'css', css: '.open #pay' },
+         `<div><button id="pay">Go</button></div>${later("document.querySelector('div').className = 'open'")}`],
+        ['a name its label is given later', { by: 'role', role: 'checkbox', name: 'Save it' },
+         `<label for="c">Keep</label><input type="checkbox" id="c">${
+             later("document.querySelector('label').textContent = 'Save it'")}`],
+        ['a name its aria-labelledby text is given later', { by: 'role', role: 'textbox', name: 'Card' },
+         `<span id="l">Car</span><input aria-labelledby="l">${
+             later("document.getElementById('l').firstChild.data = 'Card'")}`],
+        ['a name from text deep in it, changed later', pay,
+         `<button><span>Pa</span></button>${later("document.querySelector('span').firstChild.data = 'Pay'")}`],
+        ['a name from what is in it, no longer hidden', pay,
+         `<button>Pa<span hidden>y</span></button>${later("document.querySelector('span').hidden = false")}`],
+        ['a name from what is in it, no longer aria-hidden', pay,
+         `<button>Pa<span aria-hidden="true">y</span></button>${
+             later("document.querySelector('span').removeAttribute('aria-hidden')")}`],
+        ['a name from alt given later to what is in it', pay,
+         `<button><img width="10" height="10"></button>${
+             later("document.querySelector('img').alt = 'Pay'")}`],
+        ['in a cross-origin frame', pay, FRAME, PAY],
+        ['in a cross-origin frame out of process', pay, FRAME, PAY],
+        ['for a test that closes it at once, and in a later one without it', pay, [PAY, '<p>Paid</p>']],
+    ];
+    const isolated = await chromium.launch({ env: seal.env, args: ['--site-per-process'] });
+
+    try
+    {
+        for (const [what, target, html, frame] of cases)
+        {
+            /* Long enough for a page drawn again each frame to be taken
+               for one fighting the change, if it would be. */
+            const { report, errors, saw } = await mutation({ kind: 'hide', target }, html, {
+                frame, on: what.endsWith('out of process') ? isolated : browser,
+                done: /^(drawn|touched|shown later|a selector that comes)|again and again/.test(what)
+                    ? () => false : (r) => r.proven,
+                look: async (page) => Promise.all([page.title(),
+                                                   (what.includes('again and again') ? await seenBy(page) : 0)
+                                                   + await showing(page, 'button:not([data-kept])'),
+                                             page.locator('[data-kept]:not(:visible)').count(),
+                                             page.locator('[hidden][style]').count(),
+                                             showing(page, '.t')]) });
+
+            assert.deepEqual([what, report, errors, saw.slice(1)],
+                             [what, { proven: true, why: '', made: true }, [], [0, 0, 0, 0]]);
+            if (what.startsWith('before'))
+                assert.equal(saw[0], 'none');
+        }
+    }
+    finally
+    {
+        await isolated.close();
+    }
+
+    /* As a test runner's page fixture is: made before mutated(), its page
+       loaded before or after, and the browser closed as soon as the test
+       is done. */
+    for (const loaded of ['before', 'after'])
+    {
+        const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'shotbox-test-'));
+        const own = await chromium.launch({ env: seal.env });
+
+        Object.assign(process.env, { SHOTBOX_MUTATION: JSON.stringify({ kind: 'hide', target: pay }),
+                                     SHOTBOX_MUTATION_REPORT: dir });
+        try
+        {
+            const context = await own.newContext();
+            const page = await context.newPage();
+
+            if (loaded === 'before')
+                await page.setContent(PAY);
+            await mutated(context);
+            if (loaded === 'after')
+                await page.setContent(PAY);
+            if (loaded === 'before')
+                await page.close();
+            await own.close();
+            assert.deepEqual([loaded, JSON.parse(await fs.readFile(path.join(dir, `${process.pid}.json`), 'utf8'))],
+                             [loaded, { proven: true, why: '', made: true }]);
+        }
+        finally
+        {
+            delete process.env.SHOTBOX_MUTATION;
+            delete process.env.SHOTBOX_MUTATION_REPORT;
+            await own.close();
+            await fs.rm(dir, { recursive: true, force: true });
+        }
+    }
+});
+
+test('mutated: what it can\'t change or prove, unapplied, and why; a clean run changes nothing and says which targets it saw; outside mutate it does nothing',
+     { skip: why }, async () =>
+{
+    const hide = (target) => ({ kind: 'hide', target });
+    const cases = [
+        ['the page puts it back', hide(pay), PAY + script(`const b = document.querySelector('button');
+             const back = () => b.style.removeProperty('display');
+             new MutationObserver(back).observe(b, { attributes: true }); back()`),
+         /undoes the change/],
+        ['another the page takes for something else', hide(pay),
+         `${PAY}<div role="button" id="h"></div>${script(`
+             document.getElementById('h').attachShadow({ mode: 'open' }).textContent = 'Pay'`)}`,
+         /could still find it, showing/],
+        ['another the page can\'t read, in a frame', hide(pay), PAY + FRAME, /could still find it, showing/,
+         '<style>#p::before { content: "Pay" }</style><button id="p"></button>'],
+        ['another the page names differently', hide({ by: 'role', role: 'img', name: 'Logo' }),
+         '<img alt="Logo" width="10" height="10"><svg role="img" width="10" height="10"><title>Logo</title></svg>',
+         /could still find it, showing/],
+        ['no such target', hide({ ...pay, name: 'Refund' }), PAY, /never seen/],
+        ['only hidden', hide(pay), '<button hidden>Pay</button>', /never seen/],
+        ['only where the accessible tree leaves it out', hide(pay),
+         `<div aria-hidden="true">${PAY}</div>`, /never seen/],
+        ['a regex that isn\'t one', hide({ by: 'role', role: 'button', re: '(' }), PAY,
+         /Invalid regular expression/],
+        ['a selector that isn\'t one', hide({ by: 'css', css: '#pay[' }), PAY,
+         /not a valid selector/],
+        ['a kind it can\'t make yet', { kind: 'move', target: pay }, PAY, /can't make move/],
+    ];
+
+    for (const [what, spec, html, said, frame] of cases)
+    {
+        const { report, errors, saw } = await mutation(spec, html, { frame,
+            done: () => false, look: (page) => showing(page, 'button') });
+
+        assert.deepEqual([what, report.proven, errors], [what, false, []]);
+        assert.match(report.why, said, what);
+        if (what.startsWith('a kind'))
+            assert.equal(saw, 1);
+    }
+
+    const clean = { kind: null, targets: [pay, { by: 'css', css: '#twin' }, { by: 'css', css: '#pay[' }] };
+    const { report, errors, saw } = await mutation(clean, `${PAY}<button id="twin" hidden>Pay</button>`,
+        { done: (r) => r.seen?.[0], look: (page) => showing(page, 'button') });
+
+    assert.deepEqual([report, errors, saw], [{ seen: [true, false, false] }, [], 1]);
+    assert.deepEqual((await mutation(clean, [PAY, '<p>Paid</p>'], { done: () => false })).report,
+                     { seen: [true, false, false] }, 'seen in a context closed at once');
+
+    const context = await browser.newContext();
+
+    try
+    {
+        await mutated(context);
+
+        const page = await context.newPage();
+
+        await page.goto(PAGE);
+        assert.equal(await page.evaluate(() => Symbol.for('shotbox.mutation') in globalThis), false);
+    }
+    finally
+    {
+        await context.close();
     }
 });
 
