@@ -188,13 +188,14 @@ test('pageErrors hears both a throw and a console.error', { skip: why }, async (
 /* Pages for `mutated`, a context each, on a host of their own under a
    strict CSP and Trusted Types, their scripts let in by nonce. Each but
    the last is closed as soon as it has loaded, as a test that is quickly
-   done would; on the last, what the run's report says once `done` is,
-   or a second and a half on, and what `look` sees of it then. */
+   done would; on the last, what `act` does, what the run's report says
+   once `done` is, or a second and a half on, and what `look` sees of it
+   then. */
 const CSP = "default-src 'none'; script-src 'nonce-n'; style-src 'none'; " +
             "frame-src http://b.test; require-trusted-types-for 'script'; trusted-types 'none'";
 
-async function mutation (spec, pages, { frame = '', done = (r) => r.proven, look = () => null,
-                                        on = browser } = {})
+async function mutation (spec, pages, { frame = '', act = () => null, done = (r) => r.proven,
+                                        look = () => null, on = browser } = {})
 {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'shotbox-test-'));
     const read = async () => JSON.parse(await fs.readFile(path.join(dir, `${process.pid}.json`), 'utf8')
@@ -227,6 +228,7 @@ async function mutation (spec, pages, { frame = '', done = (r) => r.proven, look
                     await page.close();
                     continue;
                 }
+                await act(page);
                 await until(async () => done(await read() ?? {}), 1500);
                 const saw = await look(page);
 
@@ -453,10 +455,164 @@ test('mutated hides the target, proven by the locator the test would use: by rol
     }
 });
 
+test('mutated makes the target dead to what the test does to it, by button, link, box, field, key, form and a pointerdown widget, ahead of the page\'s own listeners, in a shadow root and a frame; and its number one higher, in what it holds and how it is named, as the page changes it or draws it anew, but not what is hidden',
+     { skip: why }, async () =>
+{
+    const acted = (css, type = 'click') => script(`document.querySelector('${css}').addEventListener('${type}',
+        (e) => { e.preventDefault(); document.title = 'acted'; })`);
+    const click = (page) => page.getByRole('button', { name: 'Pay' }).click();
+    const card = { by: 'role', role: 'textbox', name: 'Card' };
+    const dead = [
+        ['a button clicked', pay, PAY + acted('button'), click],
+        ['a button clicked on what it holds', pay, '<button><span>Pay</span></button>' + acted('button'), click],
+        ...[['the button that holds it', '<button><b>$</b> <span>Pay</span></button>' + acted('button')],
+            ['a component\'s button it is slotted into', '<x-pay><span>Pay</span></x-pay>' + script(`
+                customElements.define('x-pay', class extends HTMLElement { constructor ()
+                { super(); const b = document.createElement('button');
+                  b.append(document.createElement('slot')); this.attachShadow({ mode: 'open' }).append(b);
+                  b.addEventListener('click', () => document.title = 'acted'); } })`)],
+            ['a button the page puts around it after', '<h3><span>Pay</span></h3>' + later(`
+                const b = document.createElement('button'), h = document.querySelector('h3');
+                b.append(...h.childNodes); h.append(b);
+                b.addEventListener('click', () => document.title = 'acted')`)],
+        ].map(([what, html]) => [`${what}, clicked and pressed`, { by: 'text', name: 'Pay' }, html, async (page) =>
+        {
+            await page.getByRole('button').waitFor();
+            await page.getByText('Pay').click();
+            await page.getByRole('button').press('Enter');
+        }]),
+        ['an editor clicked on what it holds, which can\'t be edited', { by: 'css', css: '#ed' },
+         '<div id="ed" contenteditable>Note <span contenteditable="false">chip</span></div>' + acted('#ed'),
+         (page) => page.getByText('chip').click()],
+        ['a button clicked on a component it holds', pay, '<button><x-icon></x-icon>Pay</button>' + script(`
+             customElements.define('x-icon', class extends HTMLElement
+                 { constructor () { super(); this.attachShadow({ mode: 'open' }).textContent = '*'; } })`)
+         + acted('button'), (page) => page.locator('x-icon').click()],
+        ['a button clicked on what it holds, which only a script can focus', pay,
+         '<div role="button" tabindex="0"><div tabindex="-1">Pay</div></div>' + acted('[role=button]'), click],
+        ['a button pressed with Enter', pay, PAY + acted('button'),
+         (page) => page.getByRole('button').press('Enter')],
+        ['a link followed', { by: 'role', role: 'link', name: 'Pay' },
+         `<a href="#paid">Pay</a>${script("addEventListener('hashchange', () => document.title = 'acted')")}`,
+         (page) => page.getByRole('link').click()],
+        ['a box ticked', { by: 'role', role: 'checkbox', name: 'Save it' },
+         '<label for="c">Save it</label><input type="checkbox" id="c">' + acted('input', 'change'),
+         (page) => page.getByRole('checkbox').click()],
+        ['a field filled', card, '<input aria-label="Card">' + acted('input', 'input'),
+         (page) => page.getByRole('textbox').fill('4242')],
+        ['a field typed in', card, '<input aria-label="Card">' + acted('input', 'input'),
+         (page) => page.getByRole('textbox').pressSequentially('42')],
+        ['a widget that acts on pointerdown', pay, PAY + acted('button', 'pointerdown'), click],
+        ['a button clicked, which takes the focus all the same', pay, PAY, async (page) =>
+        {
+            await click(page);
+            await page.evaluate(() => document.activeElement.localName === 'button' || (document.title = 'unfocused'));
+        }],
+        ['a button tapped', pay, PAY + acted('button'), (page) => page.getByRole('button').tap()],
+        ['a menu on a right click', pay, PAY + acted('button', 'contextmenu'),
+         (page) => page.getByRole('button').click({ button: 'right' })],
+        ['a button dragged', pay, '<button draggable="true">Pay</button><p>Here</p>' + acted('button', 'dragstart'),
+         (page) => page.getByRole('button').dragTo(page.getByText('Here'))],
+        ['a slider scrolled', { by: 'role', role: 'slider', name: 'Volume' },
+         '<div role="slider" aria-label="Volume" aria-valuenow="5" tabindex="0">5</div>'
+         + acted('div', 'wheel'), async (page) =>
+         {
+             await page.getByRole('slider').click();
+             await page.mouse.wheel(0, 100);
+         }],
+        ['a field dropped onto', card, '<p draggable="true">4242</p><input aria-label="Card">' + script(`
+             document.querySelector('p').addEventListener('dragstart',
+                 (e) => e.dataTransfer.setData('text/plain', '4242'))`) + acted('input', 'drop'),
+         (page) => page.getByText('4242').dragTo(page.getByRole('textbox'))],
+        ['the page\'s own listener on the window', pay, PAY + script(`addEventListener('click',
+             (e) => e.target.closest('button') && (document.title = 'acted'), true)`), click],
+        ['a form, by the button in it', { by: 'role', role: 'form', name: 'Pay' },
+         '<form aria-label="Pay"><button>Go</button></form>' + acted('form', 'submit'),
+         (page) => page.getByRole('button').click()],
+        ['a form\'s button, by Enter in its field', pay,
+         `<form><input aria-label="Card">${PAY}</form>` + acted('form', 'submit'),
+         (page) => page.getByRole('textbox').press('Enter')],
+        ['in an open shadow root', pay, shadow(`fill(); document.getElementById('host').shadowRoot
+             .querySelector('button').addEventListener('click', () => document.title = 'acted')`), click],
+        ['in a cross-origin frame', pay, FRAME,
+         (page) => page.frameLocator('iframe').getByRole('button', { name: 'Pay' }).click(),
+         PAY + `<script>document.querySelector('button').addEventListener('click',
+             () => document.title = 'acted')</script>`],
+    ];
+
+    const touch = { newContext: () => browser.newContext({ hasTouch: true }) };
+
+    for (const [what, target, html, act, frame] of dead)
+    {
+        const { report, errors, saw } = await mutation({ kind: 'dead', target }, html, {
+            frame, act, on: what.endsWith('tapped') ? touch : browser, look: (page) => Promise.all(page.frames().map((f) => f.title())) });
+
+        assert.deepEqual([what, report, errors, saw.filter(Boolean)],
+                         [what, { proven: true, why: '', made: true }, [], []]);
+    }
+
+    const total = { by: 'text', name: 'Total: 42.50' };
+    const number = [
+        ['text, in what it holds', total, TOTAL, 'p', 'Total: 42.51'],
+        ['text by regex', { by: 'text', re: 'Total: .*' }, TOTAL, 'p', 'Total: 42.51'],
+        ['a role and its name, carrying down', { by: 'role', role: 'button', name: 'Pay $9' },
+         '<button>Pay $9</button>', 'button', 'Pay $8'],
+        ['a name from aria-label, which is said as it shows', { by: 'role', role: 'button', name: 'Pay 1,299' },
+         '<button aria-label="Pay 1,299">Pay 1,299</button>', 'button', 'Pay 1,300 | Pay 1,300'],
+        ['not what is hidden', { by: 'text', re: 'Total: .*' }, '<p>Total: <span hidden>3 </span>42.50</p>', 'p',
+         'Total: 3 42.51'],
+        ['what shows, though aria-hidden', { by: 'text', re: 'Total.*' },
+         '<p aria-label="Total 1">Total <span aria-hidden="true">5</span></p>', 'p', 'Total 6 | Total 2'],
+        ['as the page changes it', total, TOTAL + later("document.querySelector('b').textContent = '50.00'"),
+         'p', 'Total: 50.01'],
+        ['as the page draws it anew', total, TOTAL + later(`const p = document.createElement('p'),
+             b = document.createElement('b'); b.textContent = '42.50'; p.append('Total: ', b);
+             document.querySelector('p').replaceWith(p)`), 'p', 'Total: 42.51'],
+        ['as the page counts up to what it showed', { by: 'text', name: 'Count: 0' },
+         '<p>Count: <b>0</b></p>' + later("document.querySelector('b').textContent = '1'"), 'p', 'Count: 2'],
+        ['as the page counts up to what it showed, in the same text node', { by: 'text', name: 'Count: 0' },
+         '<p>Count: <b>0</b></p>' + later("document.querySelector('b').firstChild.data = '1'"), 'p', 'Count: 2'],
+        ['as the page counts up to what it showed, in its aria-label', { by: 'role', role: 'status', name: 'Count 0' },
+         '<p role="status" aria-label="Count 0"></p>' + later(`
+             document.querySelector('p').setAttribute('aria-label', 'Count 1')`), 'p', 'Count 2'],
+        ['as the page counts up to what it showed, after changing what holds it', { by: 'text', name: 'Count: 0' },
+         '<p>Count: <b>0</b></p>' + later(`document.querySelector('p').className = 'on';
+             document.querySelector('b').firstChild.data = '1'`), 'p', 'Count: 2'],
+        ['as the page counts up to what it showed, by way of something else', { by: 'text', name: 'Count: 0' },
+         '<p>Count: <b>0</b></p>' + later(`const t = document.querySelector('b').firstChild;
+             t.data = '\u2026'; t.data = '1'`), 'p', 'Count: 2'],
+        ['as the page counts up to what it showed, its name and then its text',
+         { by: 'role', role: 'button', name: 'Cart 0' }, '<button aria-label="Cart 0">Cart 0</button>' + later(`
+             const b = document.querySelector('button'); b.setAttribute('aria-label', 'Cart 1'); b.textContent = 'Cart 1'`),
+         'button', 'Cart 2 | Cart 2'],
+        ['as the page fills in what was a placeholder', { by: 'text', re: 'Total: .*' },
+         '<p>Total: \u2026</p>' + later("document.querySelector('p').textContent = 'Total: 42.50'"),
+         'p', 'Total: 42.51'],
+        ['as the page adds to it, a number of nines', { by: 'text', name: 'Total: 9' },
+         '<p>Total: 9</p>' + later("document.querySelector('p').append(' ')"), 'p', 'Total: 8 '],
+        ['as the page sets its text again, a number of nines, its name kept',
+         { by: 'role', role: 'button', name: 'Pay 9' },
+         '<button aria-label="Pay 9">Pay 9</button>' + later("document.querySelector('button').textContent = 'Pay 9'"),
+         'button', 'Pay 8 | Pay 8'],
+    ];
+
+    for (const [what, target, html, css, want] of number)
+    {
+        const { report, errors, saw } = await mutation({ kind: 'number', target }, html, {
+            done: what.startsWith('as the page') ? () => false : (r) => r.proven,
+            look: (page) => page.locator(css).evaluate((e) =>
+                [e.textContent, e.getAttribute('aria-label')].filter(Boolean).join(' | ')) });
+
+        assert.deepEqual([what, report, errors, saw], [what, { proven: true, why: '', made: true }, [], want]);
+    }
+});
+
 test('mutated: what it can\'t change or prove, unapplied, and why; a clean run changes nothing and says which targets it saw; outside mutate it does nothing',
      { skip: why }, async () =>
 {
     const hide = (target) => ({ kind: 'hide', target });
+    const dead = (target) => ({ kind: 'dead', target });
+    const nine = { by: 'role', role: 'button', name: 'Pay 9' };
     const cases = [
         ['the page puts it back', hide(pay), PAY + script(`const b = document.querySelector('button');
              const back = () => b.style.removeProperty('display');
@@ -465,30 +621,30 @@ test('mutated: what it can\'t change or prove, unapplied, and why; a clean run c
         ['another the page takes for something else', hide(pay),
          `${PAY}<div role="button" id="h"></div>${script(`
              document.getElementById('h').attachShadow({ mode: 'open' }).textContent = 'Pay'`)}`,
-         /could still find it, showing/],
+         /could still find it unchanged/],
         ['another the page can\'t read, shown after it was proven', hide(pay),
          PAY + later(`const b = document.createElement('button'); b.id = 'p';
              const sheet = new CSSStyleSheet(); sheet.replaceSync('#p::before { content: "Pay" }');
              document.adoptedStyleSheets = [sheet]; document.body.append(b)`),
-         /could still find it, showing/],
+         /could still find it unchanged/],
         ['shown unchanged by a later test, closed at once', hide(pay), [PAY, BEFORE, '<p>Paid</p>'],
-         /could still find it, showing/],
+         /could still find it unchanged/],
         ['shown unchanged by an earlier test, before it was ever made', hide(pay), [BEFORE, PAY],
-         /could still find it, showing/],
+         /could still find it unchanged/],
         ['another the page can\'t read, for a while', hide(pay), PAY + later(`
              const b = document.createElement('button'); b.id = 'p';
              const sheet = new CSSStyleSheet(); sheet.replaceSync('#p::before { content: "Pay" }');
              document.adoptedStyleSheets = [sheet]; document.body.append(b); setTimeout(() => b.remove(), 1100)`),
-         /could still find it, showing/],
-        ['another the page can\'t read, in a frame', hide(pay), PAY + FRAME, /could still find it, showing/,
+         /could still find it unchanged/],
+        ['another the page can\'t read, in a frame', hide(pay), PAY + FRAME, /could still find it unchanged/,
          '<style>#p::before { content: "Pay" }</style><button id="p"></button>'],
         ['text the page can\'t read, shown after it was proven', hide({ by: 'text', name: 'Total: 42.50' }),
          '<p>Total: 42.50</p>' + later(`const i = document.createElement('input');
              i.type = 'submit'; i.value = 'Total: 42.50'; document.body.append(i)`),
-         /could still find it, showing/],
+         /could still find it unchanged/],
         ['another the page names differently', hide({ by: 'role', role: 'img', name: 'Logo' }),
          '<img alt="Logo" width="10" height="10"><svg role="img" width="10" height="10"><title>Logo</title></svg>',
-         /could still find it, showing/],
+         /could still find it unchanged/],
         ['no such target', hide({ ...pay, name: 'Refund' }), PAY, /never seen/],
         ['only hidden', hide(pay), '<button hidden>Pay</button>', /never seen/],
         ['only where the accessible tree leaves it out', hide(pay),
@@ -499,12 +655,109 @@ test('mutated: what it can\'t change or prove, unapplied, and why; a clean run c
          /not a valid selector/],
         ['a selector only Playwright reads', hide({ by: 'css', css: 'button:has-text("Pay")' }), PAY,
          /can't look for the target: .*not a valid selector/],
+        ['dead, and never used', dead(pay), PAY, /never used/],
+        ['dead, and only pointed at, which the page still hears', dead(pay), PAY + script(`
+             document.querySelector('button').addEventListener('mouseenter', () => document.title = 'hovered')`),
+         /never used/, '', async (page) =>
+         {
+             await page.getByRole('button').hover();
+             assert.equal(await page.title(), 'hovered');
+         }],
+        ['dead, and used only by the page itself', dead(pay),
+         PAY + later("document.querySelector('button').click()"), /never used/],
+        ['dead, a choice the test sets before any event', dead({ by: 'role', role: 'combobox', name: 'Plan' }),
+         '<select aria-label="Plan"><option>A</option></select>', /before any event/],
+        ['dead, a date the test sets before any event', dead({ by: 'css', css: 'input' }),
+         '<input type="date">', /before any event/],
+        ['dead, and another the page can\'t read', dead(pay), PAY + BEFORE, /could still find it unchanged/],
+        ['dead, and another the page can\'t read, gone before the test used it', dead(pay),
+         PAY + BEFORE + later("document.getElementById('p').remove()"), /could still find it unchanged/, '',
+         async (page) => { await page.waitForTimeout(600); await page.getByRole('button').click(); }],
+        ['dead, and only tabbed through', dead({ by: 'role', role: 'textbox', name: 'Card' }),
+         '<input aria-label="Before"><input aria-label="Card"><input aria-label="Next">' + script(`
+             for (const type of ['keydown', 'keyup'])
+                 document.querySelector('[aria-label=Card]').addEventListener(type, () => document.title = 'heard')`),
+         /never used/, '', async (page) =>
+         {
+             await page.getByRole('textbox', { name: 'Before' }).focus();
+             await page.keyboard.press('Tab');
+             await page.keyboard.press('Control');
+             await page.keyboard.press('Tab');
+             assert.deepEqual(await page.evaluate(() => [document.activeElement.ariaLabel, document.title]),
+                              ['Next', '']);
+             await page.keyboard.press('Shift+Tab');
+             await page.keyboard.press('Shift+Tab');
+             assert.deepEqual(await page.evaluate(() => [document.activeElement.ariaLabel, document.title]),
+                              ['Before', '']);
+         }],
+        ['dead, and a box dropped onto it, which it can\'t take', dead({ by: 'role', role: 'region', name: 'Bin' }),
+         '<p draggable="true">Old</p><section aria-label="Bin">Drop here</section>' + script(`
+             document.querySelector('section').addEventListener('dragover', (e) => e.preventDefault());
+             document.querySelector('p').addEventListener('dragend',
+                 (e) => e.dataTransfer.dropEffect !== 'none' && e.target.remove())`), /never used/, '',
+         async (page) =>
+         {
+             await page.getByText('Old').dragTo(page.getByRole('region'));
+             assert.equal(await page.getByText('Old').count(), 1);
+         }],
+        ['dead, in a component, whose other parts still work', dead({ by: 'text', name: 'Cart' }),
+         '<div tabindex="0"><app-cart><h2>Cart</h2><p>Row</p><form><input aria-label="Name"></form></app-cart></div>'
+         + script(`document.querySelector('p').addEventListener('click', () => document.title += 'row;');
+             document.querySelector('form').addEventListener('submit', (e) =>
+                 { e.preventDefault(); document.title += 'sent;'; })`), /never used/, '', async (page) =>
+         {
+             await page.getByText('Row').click();
+             await page.getByRole('textbox').press('Enter');
+             assert.equal(await page.title(), 'row;sent;');
+         }],
+        ['dead, a form the page sends itself', dead({ by: 'role', role: 'form', name: 'F' }),
+         '<form aria-label="F"></form>' + later("document.querySelector('form').requestSubmit()"), /never used/],
+        ['dead, a form, whose fields still take what the test does', dead({ by: 'role', role: 'form', name: 'F' }),
+         '<form aria-label="F"><input aria-label="Name"><select aria-label="Plan"><option>A</option>'
+         + '<option>B</option></select><input type="checkbox" id="c"><label for="c">Keep</label>'
+         + '<x-box></x-box></form>' + script(`
+             customElements.define('x-box', class extends HTMLElement
+             {
+                 constructor () { super(); this.attachInternals().role = 'checkbox'; this.textContent = 'Box'; }
+                 connectedCallback () { this.addEventListener('click', () => this.dataset.on = ''); }
+             });
+             document.querySelector('input').addEventListener('keydown',
+                 () => requestAnimationFrame(() => document.forms[0].requestSubmit()))`), /never used/, '',
+         async (page) =>
+         {
+             await page.getByRole('textbox').fill('Ann');
+             await page.getByRole('textbox').press('a');
+             await page.getByRole('combobox').selectOption('B');
+             await page.getByText('Keep').click();
+             await page.getByText('Box').click();
+             assert.deepEqual(await page.evaluate(() => [...document.forms[0].elements].map((e) => e.value)
+                                                       .concat(document.getElementById('c').checked,
+                                                               'on' in document.querySelector('x-box').dataset)),
+                              ['Anna', 'B', 'on', true, true]);
+             await page.evaluate(() => setTimeout(() => document.forms[0].requestSubmit(), 50));
+             await page.waitForTimeout(200);
+         }],
+        ['a number, in what has none', { kind: 'number', target: pay }, PAY, /no number/],
+        ['a number, in what has none beside one that has', { kind: 'number', target: nine },
+         '<button title="Pay 9"></button><button>Pay 9</button>', /no number/],
+        ...[nine, { by: 'role', role: 'button', re: 'Pay \\d' }].flatMap((target) => [
+            ['aria-labelledby', '<span id="l">Pay 9</span><button aria-labelledby="l">Go 5</button>'],
+            ['its label', '<label for="b">Pay 9</label><button id="b">Pay 9</button>'],
+        ].map(([by, html]) => [`a number, named by ${by}, ${target.re ? 'by a regex' : 'exactly'}`,
+                               { kind: 'number', target }, html, /doesn't show the number/])),
+        ['a number, as text, only in its aria-label', { kind: 'number', target: { by: 'text', name: 'Unread' } },
+         '<p aria-label="3 unread">Unread</p>', /doesn't show the number/],
+        ['a number the page puts back', { kind: 'number', target: { by: 'text', name: 'Total: 42.50' } },
+         '<p>Total: 42.50</p>' + script(`const p = document.querySelector('p');
+             const back = () => p.textContent !== 'Total: 42.50' && (p.textContent = 'Total: 42.50');
+             new MutationObserver(back).observe(p, { subtree: true, childList: true, characterData: true });
+             back()`), /undoes the change/],
         ['a kind it can\'t make yet', { kind: 'move', target: pay }, PAY, /can't make move/],
     ];
 
-    for (const [what, spec, html, said, frame] of cases)
+    for (const [what, spec, html, said, frame, act] of cases)
     {
-        const { report, errors, saw } = await mutation(spec, html, { frame,
+        const { report, errors, saw } = await mutation(spec, html, { frame, act,
             done: () => false, look: (page) => showing(page, 'button') });
 
         assert.deepEqual([what, report.proven, errors], [what, false, []]);
