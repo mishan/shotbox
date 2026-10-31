@@ -211,7 +211,7 @@ check(here == "1280 800", f"here() is the display it's inside ({here})")
 PASSING = """import json, os, sys
 spec = json.loads(os.environ["SHOTBOX_MUTATION"])
 rep = {"seen": [True]} if spec["kind"] is None else {"proven": True}
-open(os.environ["SHOTBOX_MUTATION_REPORT"], "w").write(json.dumps(rep))
+open(os.path.join(os.environ["SHOTBOX_MUTATION_REPORT"], "r.json"), "w").write(json.dumps(rep))
 sys.exit(os.environ.get("NEEDED") != "yes")
 """
 rep = shotbox.mutate([sys.executable, "-c", PASSING], targets=['button "Pay"'],

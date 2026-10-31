@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from shotbox.mutation import target, verdict  # noqa: E402
+from shotbox.mutation import merged, target, verdict  # noqa: E402
 from shotbox.screen import SessionError  # noqa: E402
 
 fails = 0
@@ -71,5 +71,25 @@ for kind, ended, proven, confirmed, want in [
     got = verdict(kind, ended, proven, confirmed)
     check(got == want, f"{kind}, {ended}, {'proven' if proven else 'unproven'}"
           f"{'' if confirmed is None else ', confirmed' if confirmed else ', unconfirmed'}: {got}")
+
+# What each of a test's processes said, as one: seen or proven by any is
+# so, unless one found the page fighting the change; a why from one that
+# made the change before one that never saw the target.
+GONE = {"proven": False, "made": True, "why": "gone"}
+NEVER = {"proven": False, "why": "never seen"}
+for what, reports, want in [
+    ("none", [], None),
+    ("not reports", [[True], "x", None], None),
+    ("one", [{"seen": [True, False]}], {"seen": [True, False]}),
+    ("seen by either", [{"seen": [True, False]}, {"seen": [False, True]}], {"seen": [True, True]}),
+    ("seen, but not as true", [{"seen": ["yes", 1]}], {"seen": [False, False]}),
+    ("proven by one", [NEVER, {"proven": True, "why": ""}, GONE], {"proven": True, "why": ""}),
+    ("fought by one", [{"proven": True, "why": ""}, {"proven": False, "fought": True, "why": "f"}],
+     {"proven": False, "fought": True, "why": "f"}),
+    ("made by one", [NEVER, GONE], GONE),
+    ("made by none", [NEVER, NEVER], NEVER),
+]:
+    got = merged(reports)
+    check(got == want, f"merged, {what}: {got}")
 
 sys.exit(fails)

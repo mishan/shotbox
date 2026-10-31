@@ -695,7 +695,12 @@ if state:
 if mode != "silent":
     rep = {"seen": [not (mode == "unseen" and i and n) for i, _ in enumerate(spec["targets"])]} \
         if kind is None else {"proven": kind != "number"}
-    open(os.environ["SHOTBOX_MUTATION_REPORT"], "w").write(json.dumps(rep))
+    out = os.environ["SHOTBOX_MUTATION_REPORT"]
+    open(os.path.join(out, f"{os.getpid()}.json"), "w").write(json.dumps(rep))
+    # Another process's, which saw nothing, and one cut short.
+    open(os.path.join(out, "0.json"), "w").write(json.dumps(
+        {"seen": [False] * len(spec["targets"])} if kind is None else {"proven": False}))
+    open(os.path.join(out, "1.part"), "w").write("{")
 if kind is None:
     sys.exit(mode == "failing" or (mode == "dirty" and n >= 2))
 if name == "Hang" and kind == "hide":
