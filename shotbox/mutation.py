@@ -115,14 +115,15 @@ class MutationReport:
 def merged(reports):
     """The report of a test whose processes each wrote one: a target any
     saw was seen, and a change any proved is proven, unless one found the
-    page fighting it; else the why of one that made the change."""
+    page fighting it or the target still showing; else the why of one
+    that made the change."""
     reports = [r for r in reports if isinstance(r, dict)]
     if not reports:
         return None
     if all(isinstance(r.get("seen"), list) for r in reports):
         return {"seen": [any(i < len(r["seen"]) and r["seen"][i] is True for r in reports)
                          for i in range(max(len(r["seen"]) for r in reports))]}
-    for mark in ("fought", "proven", "made"):
+    for mark in ("fought", "shown", "proven", "made"):
         for r in reports:
             if r.get(mark) is True:
                 return r

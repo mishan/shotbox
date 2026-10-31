@@ -86,6 +86,8 @@ for what, reports, want in [
     ("proven by one", [NEVER, {"proven": True, "why": ""}, GONE], {"proven": True, "why": ""}),
     ("fought by one", [{"proven": True, "why": ""}, {"proven": False, "fought": True, "why": "f"}],
      {"proven": False, "fought": True, "why": "f"}),
+    ("still showing for one", [{"proven": True, "why": ""}, {"proven": False, "shown": True, "why": "s"}],
+     {"proven": False, "shown": True, "why": "s"}),
     ("made by one", [NEVER, GONE], GONE),
     ("made by none", [NEVER, NEVER], NEVER),
 ]:

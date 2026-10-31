@@ -267,6 +267,10 @@ const showing = async (page, css) =>
 const PAY = '<button>Pay</button>';
 const TOTAL = '<div><p>Total: <b>42.50</b></p><button data-kept aria-label="Other"></button></div>';
 const FRAME = '<iframe src="http://b.test/"></iframe>';
+/* A button named "Pay" by its style, which the page side can't read. */
+const BEFORE = `<button id="p"></button><script nonce="n">
+    const sheet = new CSSStyleSheet(); sheet.replaceSync('#p::before { content: "Pay" }');
+    document.adoptedStyleSheets = [sheet]</script>`;
 const pay = { by: 'role', role: 'button', name: 'Pay' };
 const script = (js) => `<script nonce="n">${js}</script>`;
 const later = (js) => script(`setTimeout(() => { ${js} }, 100)`);
@@ -462,8 +466,26 @@ test('mutated: what it can\'t change or prove, unapplied, and why; a clean run c
          `${PAY}<div role="button" id="h"></div>${script(`
              document.getElementById('h').attachShadow({ mode: 'open' }).textContent = 'Pay'`)}`,
          /could still find it, showing/],
+        ['another the page can\'t read, shown after it was proven', hide(pay),
+         PAY + later(`const b = document.createElement('button'); b.id = 'p';
+             const sheet = new CSSStyleSheet(); sheet.replaceSync('#p::before { content: "Pay" }');
+             document.adoptedStyleSheets = [sheet]; document.body.append(b)`),
+         /could still find it, showing/],
+        ['shown unchanged by a later test, closed at once', hide(pay), [PAY, BEFORE, '<p>Paid</p>'],
+         /could still find it, showing/],
+        ['shown unchanged by an earlier test, before it was ever made', hide(pay), [BEFORE, PAY],
+         /could still find it, showing/],
+        ['another the page can\'t read, for a while', hide(pay), PAY + later(`
+             const b = document.createElement('button'); b.id = 'p';
+             const sheet = new CSSStyleSheet(); sheet.replaceSync('#p::before { content: "Pay" }');
+             document.adoptedStyleSheets = [sheet]; document.body.append(b); setTimeout(() => b.remove(), 1100)`),
+         /could still find it, showing/],
         ['another the page can\'t read, in a frame', hide(pay), PAY + FRAME, /could still find it, showing/,
          '<style>#p::before { content: "Pay" }</style><button id="p"></button>'],
+        ['text the page can\'t read, shown after it was proven', hide({ by: 'text', name: 'Total: 42.50' }),
+         '<p>Total: 42.50</p>' + later(`const i = document.createElement('input');
+             i.type = 'submit'; i.value = 'Total: 42.50'; document.body.append(i)`),
+         /could still find it, showing/],
         ['another the page names differently', hide({ by: 'role', role: 'img', name: 'Logo' }),
          '<img alt="Logo" width="10" height="10"><svg role="img" width="10" height="10"><title>Logo</title></svg>',
          /could still find it, showing/],
@@ -475,6 +497,8 @@ test('mutated: what it can\'t change or prove, unapplied, and why; a clean run c
          /Invalid regular expression/],
         ['a selector that isn\'t one', hide({ by: 'css', css: '#pay[' }), PAY,
          /not a valid selector/],
+        ['a selector only Playwright reads', hide({ by: 'css', css: 'button:has-text("Pay")' }), PAY,
+         /can't look for the target: .*not a valid selector/],
         ['a kind it can\'t make yet', { kind: 'move', target: pay }, PAY, /can't make move/],
     ];
 
@@ -488,6 +512,13 @@ test('mutated: what it can\'t change or prove, unapplied, and why; a clean run c
         if (what.startsWith('a kind'))
             assert.equal(saw, 1);
     }
+
+    /* Looks that can't be made in time say nothing either way. */
+    const { report: busy } = await mutation(hide(pay),
+        PAY + script("addEventListener('load', () => setTimeout(() => { for (;;); }, 300))"),
+        { done: () => false });
+
+    assert.deepEqual(busy, { proven: true, why: '', made: true }, 'a page busy for good once proven');
 
     const clean = { kind: null, targets: [pay, { by: 'css', css: '#twin' }, { by: 'css', css: '#pay[' }] };
     const { report, errors, saw } = await mutation(clean, `${PAY}<button id="twin" hidden>Pay</button>`,

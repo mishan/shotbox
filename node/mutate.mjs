@@ -22,7 +22,7 @@
  * and again after a re-render. It finds the target as near as a page can
  * tell; whether it worked is Playwright's to say, by the locator the test
  * would use: once it's made, the test must find nothing by the target
- * showing.
+ * showing, then, every half second, and as each page closes.
  */
 
 import fs from 'node:fs';
@@ -68,11 +68,19 @@ const FOUGHT = `the page undoes the change, over ${UNDOS} times before a frame i
    Playwright's first look by role, on a page of 50,000 elements, takes
    8 s. */
 const LOOKING = 10000;
+/* How often to look while the test runs, for a copy of the target it
+   could use and the page missed; a copy used and gone between two looks
+   isn't seen. */
+const EVERY = 500;
+/* As long as one of those looks may take, which a closing page waits
+   for. */
+const GLANCE = 3000;
 const SHOWN = 'the test could still find it, showing';
 const WRAPPED = Symbol('shotbox.mutation');
 
 /* What this process has found, for all its contexts, as a test runner
-   makes one for each test: what one saw or proved stays so. The runner puts it together with its other processes'. */
+   makes one for each test: what one saw, proved, or found showing stays
+   so. The runner puts it together with its other processes'. */
 let report = null, reporting = null;
 
 export async function mutated (context)
@@ -96,16 +104,17 @@ export async function mutated (context)
     }
     write(out);
 
+    const spoiled = () => report.fought || report.shown;
     /* Why the target counts as still showing in `pages`, if it does: by
        Playwright's own locator, as the test would look for it, or because
        the look failed or took too long, which can't be taken for its
        being gone. */
-    const look = async (pages) =>
+    const look = async (pages, limit = LOOKING) =>
     {
         try
         {
             const got = await Promise.race([showing(pages, spec.target),
-                                            new Promise((ok) => setTimeout(ok, LOOKING).unref())]);
+                                            new Promise((ok) => setTimeout(ok, limit).unref())]);
 
             return got === undefined ? 'it couldn\'t be looked for in time' : got ? SHOWN : '';
         }
@@ -115,11 +124,33 @@ export async function mutated (context)
                 : `it couldn't be looked for: ${e.message.split('\n')[0]}`;
         }
     };
-    let proving = null;
-    const done = () => proving;
-    const opened = (page) => waits(page, done);
+    /* Found showing, for good. A look that fails or takes too long is
+       tried again on the next tick: a page busy a while, or a frame gone
+       as it was looked in, says nothing of a copy. Not of a target the
+       page can't look for, which a locator may find all the same. */
+    const audit = async (pages) =>
+    {
+        if (!bad && !spoiled() && await look(pages, GLANCE) === SHOWN && !spoiled())
+        {
+            Object.assign(report, { proven: false, shown: true, why: SHOWN });
+            write(out);
+        }
+    };
+    let proving = null, auditing = null, bad = false;
+    /* One look at a time, and at close only where none is under way. */
+    const done = (pages) => async () =>
+    {
+        await proving;
+        await (auditing ?? audit(pages().filter((p) => !p.isClosed())));
+    };
+    const opened = (page) => waits(page, done(() => [page]));
+    const ticking = spec.kind && setInterval(() =>
+    {
+        auditing ??= audit(context.pages()).finally(() => auditing = null);
+    }, EVERY).unref();
 
-    waits(context, done);
+    context.on('close', () => clearInterval(ticking));
+    waits(context, done(() => context.pages()));
     if (context.browser())
         waits(context.browser(), () => Promise.all(context.browser().contexts().map((c) => c[WRAPPED]?.())));
     context.pages().forEach(opened);
@@ -130,10 +161,13 @@ export async function mutated (context)
             report.seen[said.seen] = true;
         else if (said.fought)
             Object.assign(report, { proven: false, fought: true, why: FOUGHT });
-        else if (report.fought || report.proven || proving)
+        else if (spoiled() || report.proven || proving)
             return;
         else if (said.bad)
+        {
+            bad = true;
             report.why = `the page can't look for the target: ${said.bad}`;
+        }
         else
         {
             Object.assign(report, { made: true, why: 'the change was made, and not yet proven' });
@@ -142,7 +176,7 @@ export async function mutated (context)
 
             const why = await proving;
 
-            if (report.fought)
+            if (spoiled())
                 return;
             Object.assign(report, why ? { why } : { proven: true, why: '' });
         }
