@@ -274,6 +274,13 @@ const BEFORE = `<button id="p"></button><script nonce="n">
     const sheet = new CSSStyleSheet(); sheet.replaceSync('#p::before { content: "Pay" }');
     document.adoptedStyleSheets = [sheet]</script>`;
 const pay = { by: 'role', role: 'button', name: 'Pay' };
+/* A button "Pay" 40 by 20 px at 200, 200, over another, "Other", at each
+   of `offsets` from it. */
+const around = (offsets) => '<body>' + script(`for (const [x, y, name] of [...${JSON.stringify(offsets)}, [0, 0, 'Pay']])
+    { const b = document.createElement('button'); b.textContent = name ?? 'Other';
+      Object.assign(b.style, { position: 'absolute', left: 200 + x + 'px', top: 200 + y + 'px',
+                               width: '40px', height: '20px', padding: '0', border: '0' });
+      document.body.append(b); }`);
 const script = (js) => `<script nonce="n">${js}</script>`;
 const later = (js) => script(`setTimeout(() => { ${js} }, 100)`);
 const shadow = (js) => '<div id="host"></div>' + script(`const fill = () =>
@@ -588,6 +595,9 @@ test('mutated makes the target dead to what the test does to it, by button, link
         ['as the page fills in what was a placeholder', { by: 'text', re: 'Total: .*' },
          '<p>Total: \u2026</p>' + later("document.querySelector('p').textContent = 'Total: 42.50'"),
          'p', 'Total: 42.51'],
+        ['as the page styles it, a number of nines in its name', { by: 'role', role: 'button', name: 'Total 9' },
+         '<button aria-label="Total 9">Total 9</button>' + later(`const b = document.querySelector('button');
+             for (const color of ['red', 'blue', 'green']) b.style.color = color`), 'button', 'Total 8 | Total 8'],
         ['as the page adds to it, a number of nines', { by: 'text', name: 'Total: 9' },
          '<p>Total: 9</p>' + later("document.querySelector('p').append(' ')"), 'p', 'Total: 8 '],
         ['as the page sets its text again, a number of nines, its name kept',
@@ -607,12 +617,116 @@ test('mutated makes the target dead to what the test does to it, by button, link
     }
 });
 
+test('mutated runs every page at the run\'s size, those opened later too; and moves the target 40 px, the first way that covers no other control and leaves it the one at its center, as it remounts',
+     { skip: why }, async () =>
+{
+    const sizes = (page) => page.context().pages().map((p) => Object.values(p.viewportSize()));
+
+    const mobile = { newContext: () => browser.newContext({ isMobile: true }) };
+
+    for (const [what, act, want, html = PAY, on = browser, screen = [1024, 768]] of [
+        ['a page', () => null, [[1024, 768]]],
+        ['a page, as it first loads', () => null, [[1024, 768]], PAY + script('document.title = innerWidth')],
+        ['a page at a phone\'s size, in a context that takes it for a phone', () => null, [[375, 667]], PAY, mobile,
+         [375, 667]],
+        ['and a popup it opens', (page) => page.evaluate(() => window.open('about:blank')), [[1024, 768], [1024, 768]]],
+    ])
+    {
+        const { report, errors, saw } = await mutation({ kind: 'size', screen }, html, {
+            act, on, done: /popup|phone/.test(what) ? () => false : (r) => r.proven,
+            look: async (page) => [await page.title(), await sizes(page)] });
+
+        assert.deepEqual([what, report, errors, saw],
+                         [what, { proven: true, why: '', made: true }, [], [html === PAY ? '' : '1024', want]]);
+    }
+
+    /* Its translate, and what the page wrote in its title. */
+    const moved = (page) => page.evaluate(() => [getComputedStyle([...document.querySelectorAll('button')]
+        .find((b) => b.textContent.startsWith('Pay'))).translate, document.title].filter(Boolean).join(' '));
+
+    for (const [what, html, want] of [
+        ['a button', PAY, '40px'],
+        ['a button with another to its right', around([[40, 0]]), '0px 40px'],
+        ['a button with another to its right and below', around([[40, 0], [0, 40]]), '-40px'],
+        ['a button with something over where it would go', '<body>' + script(`const d = document.createElement('div');
+             Object.assign(d.style, { position: 'absolute', left: '230px', top: '190px', width: '60px', height: '40px',
+                                      zIndex: '1' });
+             document.body.append(d)`) + around([]), '0px 40px'],
+        ['a button at the right of the window', '<body>' + script(`const b = document.createElement('button');
+             b.textContent = 'Pay'; Object.assign(b.style, { position: 'fixed', right: '0', top: '0' });
+             document.body.append(b)`), '0px 40px'],
+        ['a button at the bottom right of the window, on a longer page', '<body>' + script(`
+             const b = document.createElement('button'); b.textContent = 'Pay'; document.body.style.height = '3000px';
+             Object.assign(b.style, { position: 'fixed', right: '0', bottom: '0' }); document.body.append(b)`), '-40px'],
+        ['a button with another to its right, in a shadow root', '<body>' + script(`const h = document.createElement('div');
+             const o = document.createElement('button'); o.textContent = 'Other';
+             Object.assign(o.style, { width: '40px', height: '20px', padding: '0', border: '0' });
+             Object.assign(h.style, { position: 'absolute', left: '240px', top: '200px' });
+             h.attachShadow({ mode: 'open' }).append(o); document.body.append(h)`) + around([]), '0px 40px'],
+        ['a button under a bar that lies over it where it was too', '<body>' + script(`
+             const d = document.createElement('div');
+             Object.assign(d.style, { position: 'fixed', left: '0', top: '180px', width: '100%', height: '60px',
+                                      zIndex: '1' }); document.body.append(d)`) + around([]), '40px'],
+        ['a button the page hides after', PAY + later("document.querySelector('button').hidden = true"), '40px'],
+        ['a button the page scrolls under a bar of links, which lies over it where it was too', '<body>' + script(`
+             document.body.style.height = '3000px'; const bar = document.createElement('div');
+             Object.assign(bar.style, { position: 'fixed', left: '0', top: '0', width: '100%', height: '40px',
+                                        display: 'flex', zIndex: '1' });
+             for (const name of ['Home', 'About'])
+             { const a = document.createElement('a'); a.href = '#'; a.textContent = name;
+               a.style.flex = '1'; bar.append(a); }
+             const b = document.createElement('button'); b.textContent = 'Pay';
+             Object.assign(b.style, { position: 'absolute', left: (innerWidth / 2 - 30) + 'px', top: '400px',
+                                      width: '40px', height: '20px', padding: '0', border: '0' });
+             document.body.append(bar, b); setTimeout(() => scrollTo(0, 390), 100)`), '40px'],
+        ['a button with a transition of its own, which it keeps', '<body>' + script(`
+             const b = document.createElement('button'); b.textContent = 'Pay';
+             b.style.transitionDuration = '2s'; document.body.append(b);
+             setTimeout(() => document.title = getComputedStyle(b).transitionDuration, 300)`), '40px 2s'],
+        ['a button with no transition, the page taking the move off once', '<body>' + script(`
+             const b = document.createElement('button'); b.textContent = 'Pay';
+             b.style.setProperty('transition', 'none', 'important'); document.body.append(b);
+             setTimeout(() => b.style.removeProperty('translate'), 100)`), '40px'],
+        ['a button with a transition', '<button>Pa</button>' + script(`
+             document.querySelector('button').style.transition = 'all 0.3s'`)
+         + later("document.querySelector('button').textContent = 'Pay'"), '40px'],
+        ['a button whose text the page keeps changing', '<button>Pay<span aria-hidden="true">0</span></button>'
+         + script(`const t = document.querySelector('span').firstChild;
+             setInterval(async () => { for (let i = 0; i < 12; i++)
+                 { t.data = i; await new Promise((ok) => queueMicrotask(ok)); } }, 50)`), '40px'],
+        ['as it remounts every 20 ms', PAY + script(`setInterval(() =>
+             { const b = document.createElement('button'); b.textContent = 'Pay';
+               document.querySelector('button').replaceWith(b); }, 20)`), '40px'],
+    ])
+    {
+        const { report, errors, saw } = await mutation({ kind: 'move', target: pay }, html, {
+            done: /^as it|keeps|once|bar|hides/.test(what) ? () => false : (r) => r.proven, look: moved });
+
+        assert.deepEqual([what, report, errors, saw], [what, { proven: true, why: '', made: true }, [], want]);
+    }
+});
+
 test('mutated: what it can\'t change or prove, unapplied, and why; a clean run changes nothing and says which targets it saw; outside mutate it does nothing',
      { skip: why }, async () =>
 {
     const hide = (target) => ({ kind: 'hide', target });
     const dead = (target) => ({ kind: 'dead', target });
+    const move = (target) => ({ kind: 'move', target });
     const nine = { by: 'role', role: 'button', name: 'Pay 9' };
+    /* The size of a page with no viewport of its own. */
+    const bare = await (async () =>
+    {
+        const context = await browser.newContext({ viewport: null });
+
+        try
+        {
+            return await (await context.newPage()).evaluate(() => [innerWidth, innerHeight]);
+        }
+        finally
+        {
+            await context.close();
+        }
+    })();
     const cases = [
         ['the page puts it back', hide(pay), PAY + script(`const b = document.querySelector('button');
              const back = () => b.style.removeProperty('display');
@@ -752,12 +866,62 @@ test('mutated: what it can\'t change or prove, unapplied, and why; a clean run c
              const back = () => p.textContent !== 'Total: 42.50' && (p.textContent = 'Total: 42.50');
              new MutationObserver(back).observe(p, { subtree: true, childList: true, characterData: true });
              back()`), /undoes the change/],
-        ['a kind it can\'t make yet', { kind: 'move', target: pay }, PAY, /can't make move/],
+        ['a kind it can\'t make yet', { kind: 'slow', target: pay }, PAY, /can't make slow/],
+        ['a size the test then sets its own', { kind: 'size', screen: [1024, 768] }, PAY, /size of its own/, '',
+         (page) => page.setViewportSize({ width: 800, height: 600 })],
+        ['a move that would cover another control each way', move(pay), around([[40, 0], [0, 40], [-40, 0], [0, -40]]),
+         /would cover/],
+        ['a move that would leave the page each way it could go', move(pay), '<body>' + script(`
+             for (const [x, y, name] of [[40, 0, 'R'], [0, 40, 'D'], [0, 0, 'Pay']])
+             { const b = document.createElement('button'); b.textContent = name;
+               Object.assign(b.style, { position: 'absolute', left: x + 'px', top: y + 'px', width: '40px',
+                                        height: '20px', padding: '0', border: '0', margin: '0' });
+               document.body.append(b); }`), /leave the page/],
+        ...[['in sight', '200px'], ['partly in sight', '700px']].map(([where, top]) =>
+            [`a move ${where}, under something the page puts there after`, move(pay), '<body>' + script(`
+                 document.body.style.height = '3000px'; const b = document.createElement('button');
+                 b.textContent = 'Pay'; Object.assign(b.style, { position: 'absolute', left: '200px', top: '${top}',
+                                                                 width: '40px', height: '40px' });
+                 document.body.append(b); setTimeout(() => { const d = document.createElement('div');
+                     Object.assign(d.style, { position: 'absolute', left: '235px', top: '${top}', width: '60px',
+                                              height: '40px', zIndex: '1' }); document.body.append(d); }, 100)`),
+             /covered/, '', (page) => page.getByRole('button').scrollIntoViewIfNeeded()]),
+        ['a size the page has already', { kind: 'size', screen: [1024, 768] }, PAY, /already/, '', undefined,
+         { newContext: () => browser.newContext({ viewport: { width: 1024, height: 768 } }) }],
+        ['a size the page has already, with no viewport of its own', { kind: 'size', screen: bare }, PAY,
+         /already/, '', undefined, { newContext: () => browser.newContext({ viewport: null }) }],
+        ['a move, and a control the page puts under it after', move(pay), around([]) + later(`
+             const o = document.createElement('button'); o.textContent = 'Other';
+             Object.assign(o.style, { position: 'absolute', left: '265px', top: '205px', width: '10px',
+                                      height: '10px', padding: '0', border: '0' }); document.body.append(o)`),
+         /covers another/],
+        ['a move under something, out of sight until the test scrolls to it', move(pay), '<body>' + script(`
+             const d = document.createElement('div'); document.body.style.height = '3000px';
+             Object.assign(d.style, { position: 'absolute', left: '230px', top: '2190px', width: '60px',
+                                      height: '40px', zIndex: '1' });
+             const b = document.createElement('button'); b.textContent = 'Pay';
+             Object.assign(b.style, { position: 'absolute', left: '200px', top: '2200px' });
+             document.body.append(d, b)`), /covered/, '',
+         (page) => page.getByRole('button').scrollIntoViewIfNeeded()],
+        ['a size the test sets its own of and puts back at once', { kind: 'size', screen: [1024, 768] }, PAY,
+         /size of its own/, '', async (page) =>
+         {
+             await page.setViewportSize({ width: 800, height: 600 });
+             await page.setViewportSize({ width: 1024, height: 768 });
+         }],
+        ['a move that doesn\'t move it', move({ by: 'role', role: 'link', name: 'Pay' }), '<a href="#">Pay</a>',
+         /can't be moved/],
+        ['a move of what has a translate of its own', move(pay), '<body>' + script(`
+             const b = document.createElement('button'); b.textContent = 'Pay'; b.style.translate = '1px';
+             document.body.append(b)`), /translate of its own/],
+        ['a move the page puts back', move(pay), PAY + script(`const b = document.querySelector('button');
+             const back = () => b.style.removeProperty('translate');
+             new MutationObserver(back).observe(b, { attributes: true }); back()`), /undoes the change/],
     ];
 
-    for (const [what, spec, html, said, frame, act] of cases)
+    for (const [what, spec, html, said, frame, act, on] of cases)
     {
-        const { report, errors, saw } = await mutation(spec, html, { frame, act,
+        const { report, errors, saw } = await mutation(spec, html, { frame, act, on,
             done: () => false, look: (page) => showing(page, 'button') });
 
         assert.deepEqual([what, report.proven, errors], [what, false, []]);

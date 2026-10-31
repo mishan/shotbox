@@ -64,7 +64,7 @@ function number (text)
 }
 
 const BINDING = '__shotboxMutation';
-const KINDS = new Set(['hide', 'dead', 'number']);
+const KINDS = new Set(['size', 'move', 'hide', 'dead', 'number']);
 /* More undos than this before a frame is drawn is a page fighting the
    change, and what the test does then says nothing of it. One a frame is
    a page drawing itself, as React does, which the change is made again
@@ -102,8 +102,9 @@ export async function mutated (context)
     if (reporting !== out)
     {
         reporting = out;
-        report = spec.kind ? { proven: false, why: 'the target was never seen, showing' }
-                           : { seen: spec.targets.map(() => false) };
+        report = spec.kind === 'size' ? { proven: false, why: 'no page was opened' }
+            : spec.kind ? { proven: false, why: 'the target was never seen, showing' }
+            : { seen: spec.targets.map(() => false) };
     }
     if (spec.kind && !KINDS.has(spec.kind))
     {
@@ -111,6 +112,8 @@ export async function mutated (context)
         return write(out);
     }
     write(out);
+    if (spec.kind === 'size')
+        return sized(context, spec.screen, out);
 
     const spoiled = () => report.fought || report.shown;
     /* Why the target counts as still showing in `pages`, if it does: by
@@ -172,6 +175,8 @@ export async function mutated (context)
             report.seen[said.seen] = true;
         else if (said.fought)
             Object.assign(report, { proven: false, fought: true, why: FOUGHT });
+        else if (said.covered)
+            Object.assign(report, { proven: false, shown: true, why: said.covered });
         else if (said.unfit)
         {
             unfit = said.unfit;
@@ -235,6 +240,53 @@ async function showing (pages, t)
             return true;
     }
     return false;
+}
+
+/* Every page of the context at the run's size, by Playwright, as the
+   session can't set it: those made before, and each made after as it is
+   made, before it loads anything, but for a popup the page opens with an
+   address, which loads at the context's size first. The test setting a
+   size of its own spoils it. */
+function sized (context, [width, height], out)
+{
+    const take = async (page) =>
+    {
+        const set = page.setViewportSize;
+        /* With no viewport of its own, its window's, read again where a
+           load the test began loses the first read. */
+        let was = page.viewportSize();
+
+        for (let tries = 3; !was && tries-- && !page.isClosed();)
+            was = await page.evaluate(() => ({ width: innerWidth, height: innerHeight })).catch(() => null);
+
+        if (was?.width === width && was?.height === height)
+        {
+            if (!report.made)
+                report.why = 'the page is at that size already';
+            return write(out);
+        }
+        page.setViewportSize = async function (size)
+        {
+            if (size.width !== width || size.height !== height)
+            {
+                Object.assign(report, { proven: false, shown: true, why: 'the test set a size of its own' });
+                write(out);
+            }
+            return set.call(this, size);
+        };
+        return set.call(page, { width, height }).then(() =>
+        {
+            if (!report.shown && !report.made)
+                Object.assign(report, { made: true, proven: true, why: '' });
+        }, (e) =>
+        {
+            if (!report.made)
+                report.why = `the page couldn't be set to the size: ${e.message.split('\n')[0]}`;
+        }).then(() => write(out));
+    };
+
+    context.on('page', take);
+    return Promise.all(context.pages().map(take));
 }
 
 /* Make `closing.close()` wait for `first` before it closes. */
@@ -415,13 +467,21 @@ function inPage ({ spec, binding, undos }, number, bumped)
                                                         : showsText(c) ? texts(c) : []);
     const shown = (el) => texts(el).map((t) => t.data).join('');
     const wrote = new WeakMap();
+    /* Which way each was moved. */
+    const way = new WeakMap();
     /* What the page has written over, of what was made: each write made
        is owed a record of its own, which isn't the page's. */
     const owed = new Map(), rewritten = new WeakSet();
+    const now = (n) => n.nodeType === Node.TEXT_NODE ? n.data
+        : `${n.getAttribute('style')}\n${n.getAttribute('aria-label')}`;
+    /* A write that changes nothing makes no record. */
     const write = (n, f) =>
     {
-        owed.set(n, (owed.get(n) ?? 0) + 1);
+        const was = now(n);
+
         f();
+        if (now(n) !== was)
+            owed.set(n, (owed.get(n) ?? 0) + 1);
     };
     const over = (was, nodes) => was.nodes.some((t) => rewritten.has(t) || !nodes.includes(t));
     /* Playwright sets these first, and only then sends their events. */
@@ -489,6 +549,113 @@ function inPage ({ spec, binding, undos }, number, bumped)
             unfit: (el) => bumped(shown(el)) || bumped(el.getAttribute('aria-label') ?? '') ? ''
                 : 'its text and aria-label have no number to change',
         },
+    };
+    /* Whether at x, y nothing lies over it but what would where it was,
+       moved dx, dy from there. */
+    const clear = (el, x, y, dx, dy) =>
+    {
+        const root = el.getRootNode(), hit = root.elementFromPoint(x, y), was = root.elementFromPoint(x - dx, y - dy);
+
+        if (el.contains(hit))
+            return true;
+        /* What holds both, as a bar of links does, if it doesn't hold it. */
+        for (let c = hit; c; c = up(c))
+            if (c.contains(was))
+                return !c.contains(el);
+        return false;
+    };
+    /* The centers of the other controls showing, in any open root. */
+    const centers = (el) => [document, ...roots].flatMap((root) => [...root.querySelectorAll(CONTROLS)])
+        .filter((c) => !c.contains(el) && !el.contains(c) && c.checkVisibility())
+        .map((c) => c.getBoundingClientRect()).map((r) => [r.x + r.width / 2, r.y + r.height / 2]);
+    const covers = (r, points) => points.some(([a, b]) => a >= r.left && a < r.right && b >= r.top && b < r.bottom);
+    /* Covered where it moved, looked at each frame its center is in
+       sight, and covering another control's center, each frame after the
+       page changes: the page may put either there later. */
+    let covered = false, stirred = false;
+    const cover = () =>
+    {
+        for (const el of covered || spec.kind !== 'move' ? [] : live)
+        {
+            const r = el.getBoundingClientRect(), [x, y] = [r.x + r.width / 2, r.y + r.height / 2];
+            const [dx = 0, dy = 0] = way.get(el).split(' ').map(parseFloat);
+
+            if (!changed.has(el) || !el.isConnected || !el.checkVisibility())
+                continue;
+            const why = stirred && covers(r, centers(el)) ? 'it covers another control where it moved'
+                : x >= 0 && y >= 0 && x < innerWidth && y < innerHeight && !clear(el, x, y, dx, dy)
+                    ? 'it is covered where it moved' : '';
+
+            if (why)
+            {
+                covered = true;
+                said({ covered: why });
+            }
+        }
+        stirred = false;
+    };
+    const fixed = (el) =>
+    {
+        for (let a = el; a; a = up(a))
+            if (a.nodeType === Node.ELEMENT_NODE && getComputedStyle(a).position === 'fixed')
+                return true;
+        return false;
+    };
+    KINDS.move = {
+        make: (el) => el.style.setProperty('translate', way.get(el), 'important'),
+        undone: (el) => el.style.getPropertyValue('translate') !== way.get(el),
+        unfit: (el) => rule(el),
+    };
+    /* The first way it can go: still on the page, or in the window if it
+       is fixed there; over no other control's center, in any root; and
+       still what lies at its own center, where that is in sight. */
+    const rule = (el) =>
+    {
+        if (getComputedStyle(el).translate !== 'none')
+            return 'it has a translate of its own';
+        const points = centers(el);
+        const page = document.documentElement;
+        const [left, top, right, bottom] = fixed(el) ? [0, 0, innerWidth, innerHeight]
+            : [-scrollX, -scrollY, Math.max(page.scrollWidth, innerWidth) - scrollX,
+               Math.max(page.scrollHeight, innerHeight) - scrollY];
+        const was = el.getBoundingClientRect();
+        /* Its own transition, put back as it was, a part at a time. */
+        const kept = ['property', 'duration', 'timing-function', 'delay', 'behavior'].map((part) =>
+            [`transition-${part}`, el.style.getPropertyValue(`transition-${part}`),
+             el.style.getPropertyPriority(`transition-${part}`)]);
+
+        /* Each tried, its writes owed, or they would be taken for the
+           page's and tried again. */
+        write(el, () => el.style.setProperty('transition', 'none', 'important'));
+        try
+        {
+            for (const [x, y] of [[40, 0], [0, 40], [-40, 0], [0, -40]])
+            {
+                write(el, () => el.style.setProperty('translate', `${x}px ${y}px`, 'important'));
+                const r = el.getBoundingClientRect();
+                const [cx, cy] = [r.x + r.width / 2, r.y + r.height / 2];
+                const sighted = cx >= 0 && cy >= 0 && cx < innerWidth && cy < innerHeight;
+                const open = !sighted || clear(el, cx, cy, x, y);
+                const value = el.style.getPropertyValue('translate');
+
+                write(el, () => el.style.removeProperty('translate'));
+                if (r.x === was.x && r.y === was.y)
+                    return 'it can\'t be moved, as what is inline in text can\'t';
+                if (r.left >= left && r.top >= top && r.right <= right && r.bottom <= bottom
+                    && open
+                    && !covers(r, points))
+                {
+                    way.set(el, value);
+                    return '';
+                }
+            }
+            return 'it would cover another control, be covered, or leave the page, whichever way it moved';
+        }
+        finally
+        {
+            for (const [name, value, priority] of kept)
+                write(el, () => value ? el.style.setProperty(name, value, priority) : el.style.removeProperty(name));
+        }
     };
     const kind = KINDS[spec.kind];
     /* Counted until a frame is drawn, or for a second where none is, as
@@ -567,6 +734,8 @@ function inPage ({ spec, binding, undos }, number, bumped)
     const watch = (root) => observer.observe(root, { childList: true, subtree: true,
                                                      attributes: true, characterData: true });
     const watched = new WeakSet();
+    /* The open shadow roots, for what is in them. */
+    const roots = new Set();
     const scan = (root) =>
     {
         for (const el of [root, ...root.querySelectorAll('*')])
@@ -574,6 +743,7 @@ function inPage ({ spec, binding, undos }, number, bumped)
             if (el.shadowRoot && !watched.has(el.shadowRoot))
             {
                 watched.add(el.shadowRoot);
+                roots.add(el.shadowRoot);
                 watch(el.shadowRoot);
             }
             if (el.shadowRoot)
@@ -615,11 +785,11 @@ function inPage ({ spec, binding, undos }, number, bumped)
        as what is made on one would be owed the record of a later one. */
     const theirs = (r) =>
     {
-        if (r.type !== 'characterData' && r.attributeName !== 'aria-label')
+        if (r.type !== 'characterData' && r.attributeName !== 'aria-label' && r.attributeName !== 'style')
             return true;
         const n = owed.get(r.target);
 
-        if (!n)
+        if (!n && r.attributeName !== 'style')
             rewritten.add(r.target);
         else if (n > 1)
             owed.set(r.target, n - 1);
@@ -630,6 +800,7 @@ function inPage ({ spec, binding, undos }, number, bumped)
     const observer = new MutationObserver((records) =>
     {
         looked = new Set();
+        stirred = true;
         for (const r of records.filter(theirs))
         {
             if (fought)
@@ -735,6 +906,7 @@ function inPage ({ spec, binding, undos }, number, bumped)
     {
         [undone, since] = [new Map(), performance.now()];
         recheck();
+        cover();
         if (!fought)
             requestAnimationFrame(frame);
     };
@@ -749,6 +921,7 @@ function inPage ({ spec, binding, undos }, number, bumped)
         if (init?.mode === 'open')
         {
             watched.add(root);
+            roots.add(root);
             watch(root);
         }
         return root;
