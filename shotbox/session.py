@@ -1475,7 +1475,7 @@ class Session(Screen):
             # session's marks; before the watchdog stands down, which
             # finishes the job if a Ctrl-C cuts this short.
             from .mcp import reap
-            reap(self.scratch, keep=True)
+            reap(self.scratch, keep=True, spare=True)
         if self._watch is not None:
             # Its processes stopped, the session needs no watchdog, and a
             # Ctrl-C cutting what's left short mustn't set it on a
