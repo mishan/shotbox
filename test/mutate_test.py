@@ -123,11 +123,12 @@ for i in range(20000):
 else:
     check(True, "targets over random input")
 
-# A BRITTLE needs a rerun to confirm it.
-try:
-    mutate(["true"], ['button "Pay"'], confirm=0)
-    check(False, "confirm=0 taken")
-except SessionError as e:
-    check("confirm" in str(e), f"confirm=0 refused: {e}")
+# A BRITTLE needs a rerun to confirm it, and a run some time to run.
+for bad in ({"confirm": 0}, {"timeout": 0}, {"timeout": -1}):
+    try:
+        mutate(["true"], ['button "Pay"'], **bad)
+        check(False, f"{bad} taken")
+    except SessionError as e:
+        check(next(iter(bad)) in str(e), f"{bad} refused: {e}")
 
 sys.exit(fails)

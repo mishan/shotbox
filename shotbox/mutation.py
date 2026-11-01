@@ -160,6 +160,8 @@ def mutate(cmd, targets, kinds=None, confirm=1, timeout=None, only=None, save=No
     kinds = kinds.split(",") if isinstance(kinds, str) else kinds
     if confirm < 1:
         raise SessionError(f"confirm={confirm}: a BRITTLE needs at least one rerun to confirm it")
+    if timeout is not None and not timeout > 0:
+        raise SessionError(f"timeout {timeout:g}: a run needs more than 0 seconds")
     runs = plan(targets, list(MATTERS) if kinds is None else kinds, only)
     if save and Path(save).exists() and any(Path(save).iterdir()):
         raise SessionError(f"--save {save}: it has files in it already, which a run's "
