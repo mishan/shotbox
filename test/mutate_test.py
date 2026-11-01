@@ -2,6 +2,8 @@
 """shotbox mutate's targets and verdicts, which need no display:
 test/mutate_test.py."""
 
+import json
+import random
 import sys
 from pathlib import Path
 
@@ -93,6 +95,33 @@ for what, reports, want in [
 ]:
     got = merged(reports)
     check(got == want, f"merged, {what}: {got}")
+
+# Targets over random input: a role and any name with something in it, as
+# JSON, comes back as given; anything at all is a target or refused as one.
+rng = random.Random(1)
+CHARS = 'ab Z09 "\\/:\t\u00e9\u4e2d'
+for i in range(20000):
+    role = "".join(rng.choice("abcxyz") for _ in range(rng.randint(1, 8)))
+    name = "".join(rng.choice(CHARS) for _ in range(rng.randint(0, 10)))
+    spec = f"{role} {json.dumps(name)}"
+    try:
+        got = target(spec)
+        ok = name.strip() and got == {"by": "role", "role": role, "name": name}
+    except SessionError:
+        ok = not name.strip()
+    if not ok:
+        check(False, f"target {spec!r}: {got if name.strip() else 'taken'}")
+        break
+    junk = "".join(rng.choice(CHARS + "css:text/") for _ in range(rng.randint(0, 16)))
+    try:
+        target(junk)
+    except SessionError:
+        pass
+    except Exception as e:
+        check(False, f"target {junk!r} raised {e!r}")
+        break
+else:
+    check(True, "targets over random input")
 
 # A BRITTLE needs a rerun to confirm it.
 try:
