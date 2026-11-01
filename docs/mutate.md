@@ -34,12 +34,45 @@ with the total hidden, and with the total a cent off.
 The test opts in with one line, before it opens its first page:
 
 ```js
+import { chromium } from 'playwright';
 import { mutated } from 'shotbox';
 
+const browser = await chromium.launch();
 const context = await browser.newContext();
 await mutated(context);
 const page = await context.newPage();
+try
+{
+    // the test
+}
+finally
+{
+    await browser.close();
+}
 ```
+
+Close the browser or the context before the test ends, in a `finally`:
+the last look at the target is made as it closes. A test that dies
+with its browser open, and has made a change that should matter fail,
+still counts as having caught it.
+
+With Playwright Test, which makes a context for each test, give its
+`context` fixture the line:
+
+```js
+import { test as base } from '@playwright/test';
+import { mutated } from 'shotbox';
+
+export const test = base.extend({
+    context: async ({ context }, use) =>
+    {
+        await mutated(context);
+        await use(context);
+    },
+});
+```
+
+and run `shotbox mutate --target ... -- npx playwright test`.
 
 In a run of `shotbox mutate`, `mutated()` makes that run's change to
 every page and frame of the context, and writes down whether it was
@@ -98,6 +131,11 @@ comparison by design.
 | shouldn't matter | robust | BRITTLE, if it fails again on a rerun while a clean rerun passes; else inconclusive | inconclusive | UNAPPLIED |
 | should matter | BLIND | caught | caught (timeout) | UNAPPLIED |
 
+A change that should matter, made and still being looked for when the
+test failed, as a test that dies at once can't wait for, counts as
+caught; not where the page fought it, a copy of the target was found
+showing, or the test never used a dead target.
+
 An UNAPPLIED run says nothing of the test, with why: the target was
 never seen, the page undoes the change faster than it's drawn, a copy
 of the target is still showing unchanged, the test never used a dead
@@ -118,20 +156,38 @@ Options: `--kinds` picks the changes, `--only RUN` reruns one (as the
 needs (1), `--timeout S` stops a run after S seconds (by default, a
 changed run after 3 times the slower clean run, at least 30 s, and the
 first two clean runs never), `--save DIR` keeps each run's output and
-report. The session options apply to every run.
+the page side's reports. The session options apply to every run. A
+hidden target makes a test that clicks it wait out its timeout: the
+Playwright library's 30 s action timeout, or Playwright Test's 30 s
+test timeout, unless the test sets a shorter one. The count of
+clean runs at the start leaves out the clean reruns that confirm a
+BRITTLE.
 
 `--json` prints, in place of the lines above, `{runs: [{label, spec,
 ended, seconds, proven, why, verdict}], clean, control, suspect,
-strict, reproduce}`, where `why` is the page side's reason alone; it
-prints nothing when it stops with 2.
+strict, reproduce}`, and nothing when it stops with 2:
+
+- `spec`: the change, as `{kind, target}` with the target as
+  `{by: "role", role, name}` (or `re` for a regex), `{by: "text", name}`
+  or `re`, or `{by: "css", css}`; for a size, `{kind: "size", screen:
+  [width, height]}`.
+- `ended`: `pass`, `fail` or `timeout`; `seconds`, how long it ran.
+- `why`: the page side's reason, without the reruns' notes; for a run
+  caught though its change wasn't yet proven (`proven` false), that.
+- `clean`: how the two first clean runs ended, `["pass", "pass"]`;
+  `control`: how the last one did.
+- `reproduce`: the command for the first finding, or `null`.
 
 From Python: `shotbox.mutate(cmd, targets, kinds=None, confirm=1,
 timeout=None, only=None, save=None, strict=False, out=None,
-**session_options)`, with `kinds` a list or `"a,b"` and `out` a file
-for the lines above, returns a `MutationReport`: `runs`,
-`brittle_runs`, `blind_runs`, `unapplied_runs`, `clean`, `control`,
-`suspect` and `status`, 0 or 1. Where the command stops with 2, it
-raises `shotbox.SessionError`.
+**session_options)`, with `cmd` a list of the program and its
+arguments, `kinds` a list or `"a,b"`, `out` a file for the lines above
+but the `reproduce:` line, and the session options as `Session` takes
+them (`size=(1024, 768)`, `a11y=True`, `net="loopback"`: [Python](python.md)).
+It returns a `MutationReport`: `runs`, `brittle_runs`, `blind_runs`,
+`unapplied_runs`, `clean`, `control`, `suspect`, `strict` and
+`status`, 0 or 1; to rerun one, pass its `label` as `only`. Where the
+command stops with 2, it raises `shotbox.SessionError`.
 
 ## Limits
 

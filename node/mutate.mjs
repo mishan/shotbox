@@ -173,6 +173,8 @@ export async function mutated (context)
     {
         if ('seen' in said)
             report.seen[said.seen] = true;
+        else if (!spec.kind && said.bad)
+            (report.bad ??= {})[said.target] = said.bad;
         else if (said.fought)
             Object.assign(report, { proven: false, fought: true, why: FOUGHT });
         else if (said.covered)
@@ -186,10 +188,9 @@ export async function mutated (context)
         }
         else if (said.used)
         {
-            used = true;
-            if (!clear || spoiled() || report.proven)
-                return;
-            Object.assign(report, { proven: true, why: '' });
+            used = report.used = true;
+            if (clear && !spoiled() && !report.proven)
+                Object.assign(report, { proven: true, why: '' });
         }
         else if (spoiled() || report.proven || proving)
             return;
@@ -200,11 +201,15 @@ export async function mutated (context)
         }
         else
         {
-            Object.assign(report, { made: true, why: 'the change was made, and not yet proven' });
+            /* Looking, until the look is done: a test that fails before
+               then failed on the change. */
+            Object.assign(report, { made: true, looking: true, why: 'the change was made, and not yet proven' });
             write(out);
             proving = look([page]).finally(() => proving = null);
 
             const why = await proving;
+
+            delete report.looking;
 
             if (spoiled())
                 return;
@@ -423,7 +428,7 @@ function inPage ({ spec, binding, undos }, number, bumped)
         return (s) => re.test(s);
     };
     const nothing = () => false;
-    const matches = targets.map((t) =>
+    const matches = targets.map((t, i) =>
     {
         try
         {
@@ -446,8 +451,7 @@ function inPage ({ spec, binding, undos }, number, bumped)
         }
         catch (e)
         {
-            if (spec.kind)
-                said({ bad: e.message });
+            said(spec.kind ? { bad: e.message } : { bad: e.message, target: i });
             return nothing;
         }
     });

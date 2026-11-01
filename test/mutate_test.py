@@ -123,12 +123,24 @@ for i in range(20000):
 else:
     check(True, "targets over random input")
 
-# A BRITTLE needs a rerun to confirm it, and a run some time to run.
-for bad in ({"confirm": 0}, {"timeout": 0}, {"timeout": -1}):
+# What can't be run is refused before any session starts: a BRITTLE needs
+# a rerun to confirm it, a run some time, a session options it has, and
+# the test a list of its arguments.
+PAY = ['button "Pay"']
+for said, call in [
+    ("confirm=0", lambda: mutate(["true"], PAY, confirm=0)),
+    ("timeout 0", lambda: mutate(["true"], PAY, timeout=0)),
+    ("timeout -1", lambda: mutate(["true"], PAY, timeout=-1)),
+    ("screen", lambda: mutate(["true"], PAY, screen="1024x768")),
+    ("a list", lambda: mutate("node t.mjs", PAY)),
+    ("a list", lambda: mutate([], PAY)),
+]:
     try:
-        mutate(["true"], ['button "Pay"'], **bad)
-        check(False, f"{bad} taken")
+        call()
+        check(False, f"{said}: taken")
     except SessionError as e:
-        check(next(iter(bad)) in str(e), f"{bad} refused: {e}")
+        check(said in str(e), f"{said}: refused: {e}")
+    except Exception as e:
+        check(False, f"{said}: {e!r}")
 
 sys.exit(fails)

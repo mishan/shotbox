@@ -695,6 +695,10 @@ if state:
 if mode != "silent":
     rep = {"seen": [not (mode == "unseen" and i and n) for i, _ in enumerate(spec["targets"])]} \
         if kind is None else {"proven": kind != "number"}
+    if mode == "died" and kind is not None:
+        rep = {"proven": False, "made": True, "looking": True, "why": "the change was made, and not yet proven",
+               **{"Fought": {"fought": True}, "Shown": {"shown": True}, "Used": {"used": True},
+                  "Looked": {"looking": False, "why": "the test could still find it unchanged"}}.get(name, {})}
     out = os.environ["SHOTBOX_MUTATION_REPORT"]
     open(os.path.join(out, f"{os.getpid()}.json"), "w").write(json.dumps(rep))
     # Another process's, which saw nothing, and one cut short.
@@ -703,6 +707,8 @@ if mode != "silent":
     open(os.path.join(out, "1.part"), "w").write("{")
 if kind is None:
     sys.exit(mode == "failing" or (mode == "dirty" and n >= 2))
+if mode == "died":
+    sys.exit(1)
 if name == "Hang" and kind == "hide":
     time.sleep(60)
 sys.exit({"Pay": kind in ("hide", "number"), "Brittle": kind == "move",
@@ -727,6 +733,24 @@ sys.exit(not (got == want and list(got) == list(want) and j["control"] == "pass"
               "--target 'button \"Brittle\"' --kinds size,move,hide,number "
               f"--only 'move button \"Brittle\"' -- python3 {sys.argv[2]} good"))
 PY
+# A test that fails on a change made but not yet looked at, as one that
+# dies at once leaves it: caught, unless fought, still showing, dead and
+# unused, or looked at and not proven.
+"$sb" mutate --target 'button "Made"' --target 'button "Fought"' --target 'button "Shown"' \
+  --target 'button "Used"' --target 'button "Looked"' --kinds hide,dead --json -- python3 "$tmp/fake.py" died > "$tmp/m.json" 2> "$tmp/err" \
+  && python3 - "$tmp/m.json" <<'PY' && ok "mutate: a failure on a change made, not yet proven, counts as caught" \
+  || fail "mutate, died: $(head -c 600 "$tmp/m.json") $(cat "$tmp/err")"
+import json, sys
+got = {r["label"]: r["verdict"] for r in json.load(open(sys.argv[1]))["runs"]}
+sys.exit(got != {'hide button "Made"': "caught", 'dead button "Made"': "UNAPPLIED",
+                 'hide button "Fought"': "UNAPPLIED", 'dead button "Fought"': "UNAPPLIED",
+                 'hide button "Shown"': "UNAPPLIED", 'dead button "Shown"': "UNAPPLIED",
+                 'hide button "Used"': "caught", 'dead button "Used"': "caught",
+                 'hide button "Looked"': "UNAPPLIED", 'dead button "Looked"': "UNAPPLIED"})
+PY
+set +e; "$sb" mutate --target 'button "Pay"' --timeout 0 -- true > "$tmp/out" 2>&1; st=$?; set -e
+[ $st = 2 ] && grep -q '^usage: shotbox mutate' "$tmp/out" && grep -qF 'more than 0, up to a day' "$tmp/out" \
+  && ok "mutate --timeout 0: refused as an option" || fail "mutate --timeout 0: status $st, $(cat "$tmp/out")"
 set +e; "$sb" mutate --target 'button "Pay"' --save "$tmp/saved" -- true > "$tmp/out" 2>&1; st=$?
 "$sb" mutate --target 'button "Pay"' --save "$tmp/fake.py/x" -- true > "$tmp/out2" 2>&1; st2=$?; set -e
 [ $st = 2 ] && grep -q "has files in it already" "$tmp/out" && [ $st2 = 2 ] && grep -q "Not a directory" "$tmp/out2" \

@@ -4,6 +4,7 @@ tests, to find a test that fails on a change that shouldn't matter
 """
 
 import dataclasses
+import inspect
 import itertools
 import json
 import re
@@ -116,13 +117,16 @@ def merged(reports):
     """The report of a test whose processes each wrote one: a target any
     saw was seen, and a change any proved is proven, unless one found the
     page fighting it or the target still showing; else the why of one
-    that made the change."""
+    that made the change. What any page couldn't read of a target, by
+    its index, is kept."""
     reports = [r for r in reports if isinstance(r, dict)]
     if not reports:
         return None
     if all(isinstance(r.get("seen"), list) for r in reports):
+        bad = {k: v for r in reports if isinstance(r.get("bad"), dict) for k, v in r["bad"].items()}
         return {"seen": [any(i < len(r["seen"]) and r["seen"][i] is True for r in reports)
-                         for i in range(max(len(r["seen"]) for r in reports))]}
+                         for i in range(max(len(r["seen"]) for r in reports))],
+                **({"bad": bad} if bad else {})}
     for mark in ("fought", "shown", "proven", "made"):
         for r in reports:
             if r.get(mark) is True:
@@ -162,6 +166,12 @@ def mutate(cmd, targets, kinds=None, confirm=1, timeout=None, only=None, save=No
         raise SessionError(f"confirm={confirm}: a BRITTLE needs at least one rerun to confirm it")
     if timeout is not None and not timeout > 0:
         raise SessionError(f"timeout {timeout:g}: a run needs more than 0 seconds")
+    if isinstance(cmd, str) or not cmd:
+        raise SessionError(f"cmd {cmd!r}: give a list, the program and its arguments")
+    try:
+        inspect.signature(Session).bind(**session_options)
+    except TypeError as e:
+        raise SessionError(f"session options: {e}") from None
     runs = plan(targets, list(MATTERS) if kinds is None else kinds, only)
     if save and Path(save).exists() and any(Path(save).iterdir()):
         raise SessionError(f"--save {save}: it has files in it already, which a run's "
@@ -210,14 +220,27 @@ def mutate(cmd, targets, kinds=None, confirm=1, timeout=None, only=None, save=No
             if got is None:
                 raise Unusable("the test never called mutated(), or it wrote no report: "
                                "with no proof of what changed, nothing can be judged")
+        unread = {k: v for _, _, g, _ in firsts for k, v in g.get("bad", {}).items()}
         for i, spec in enumerate(targets):
+            if str(i) in unread:
+                raise Unusable(f"{spec} isn't one the page can read: {unread[str(i)]}")
             if not all(isinstance(g.get("seen"), list) and g["seen"][i:i + 1] == [True]
                        for _, _, g, _ in firsts):
-                raise Unusable(f"the clean runs didn't both find {spec}")
+                raise Unusable(f"the clean runs didn't both find {spec}"
+                               + (" (a regex matches all of the name or text, not a part)"
+                                  if "re" in target(spec) else ""))
         limit = timeout or max(30.0, 3 * max(t for _, t, *_ in firsts))
         for r in runs:
             r.ended, r.seconds, got, _ = go(r.label, r.spec, limit)
             r.proven, r.why = bool(got and got.get("proven")), str((got or {}).get("why", ""))
+            # A test that fails on a change that should matter, made and
+            # still being looked for, not fought and no copy found showing,
+            # failed on it, though it died before the look was done.
+            made = bool(got and got.get("made") and got.get("looking") and not got.get("fought")
+                        and not got.get("shown") and (r.spec["kind"] != "dead" or got.get("used")))
+            died = not r.proven and made and r.ended != "pass" and MATTERS[r.spec["kind"]]
+            if died:
+                r.why = "the change was made; the test failed before it was proven"
             confirmed, notes = None, [r.why] if r.why else []
             if r.ended == "fail" and r.proven and not MATTERS[r.spec["kind"]]:
                 again = [go(r.label, r.spec, limit) for _ in range(confirm)]
@@ -227,7 +250,7 @@ def mutate(cmd, targets, kinds=None, confirm=1, timeout=None, only=None, save=No
                     e = go("clean", clean, limit)[0]
                     notes.append(f"clean rerun {said(e)}")
                     confirmed = e == "pass"
-            r.verdict = verdict(r.spec["kind"], r.ended, r.proven, confirmed)
+            r.verdict = verdict(r.spec["kind"], r.ended, r.proven or died, confirmed)
             say(f"{r.label:<30}  {said(r.ended):<7}  {r.verdict}"
                 + (f"  ({', '.join(notes)})" if notes else ""))
         control = go("control", clean, limit)[0]
