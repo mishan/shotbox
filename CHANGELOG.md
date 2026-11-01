@@ -22,8 +22,8 @@
   `exec`, `stop`, Python's `Session` and each run of `shotbox mutate`.
   The session now stops whatever is still marked as its own, as it
   already did when killed outright, a lasting session started inside it
-  too; a recording finishing its file, and a command put in it from
-  outside with `--session`, still end on their own.
+  too; but not a recording's keeper finishing its file, nor a command
+  put in it from outside with `--session`.
 
 ## 0.10.0 — 2026-10-23
 
