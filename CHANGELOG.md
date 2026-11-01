@@ -14,6 +14,16 @@
   change can't be proven is UNAPPLIED, with why. Python has
   `shotbox.mutate()`.
 
+### Fixed
+
+- A program a session started that left its process group, as `setsid`
+  does (a daemon, a test runner's helper, a browser's own launcher),
+  kept running after the session ended normally, with `shotbox run`,
+  `exec`, `stop`, Python's `Session` and each run of `shotbox mutate`.
+  The session now stops whatever is still marked as its own, as it
+  already did when killed outright; a command put in it from outside
+  with `--session`, as a recording, still ends on its own.
+
 ## 0.10.0 — 2026-10-23
 
 Contrast measures web pages' text run by run, in Firefox as in

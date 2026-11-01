@@ -199,6 +199,15 @@ esac
 pid=$(cat "$tmp/orphan")
 kill -0 "$pid" 2>/dev/null && { fail "a child left behind outlived the session"; kill "$pid"; } \
   || ok "what a program leaves behind stops with the session"
+# And one in a session of its own, out of the program's group, from the
+# command and from Python.
+"$sb" run -- sh -c "setsid sleep 300 & echo \$! > '$tmp/orphan'; sleep 0.5"
+PYTHONPATH="$here/.." python3 -c "import shotbox, sys
+with shotbox.Session(display=False) as s:
+    s.run(['sh', '-c', 'setsid sleep 300 & echo \$! > ' + sys.argv[1] + '; sleep 0.5'])" "$tmp/orphan2"
+left=$(for f in "$tmp/orphan" "$tmp/orphan2"; do p=$(cat "$f"); ! kill -0 "$p" 2>/dev/null || { echo "$p"; kill "$p"; }; done)
+[ -z "$left" ] && ok "a child in a session of its own stops with the session, from run and Python" \
+  || fail "a child in a session of its own outlived the session: $left"
 names=$("$sb" run -- gdbus call --session --dest org.freedesktop.DBus \
   --object-path / --method org.freedesktop.DBus.ListActivatableNames)
 [ "$names" = "(['org.freedesktop.DBus'],)" ] && ok "nothing activatable on the bus" \

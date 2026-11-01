@@ -1480,6 +1480,11 @@ class Session(Screen):
         for meter in (self._sampler, self._slice):
             if meter:
                 meter.close()
+        if self.scratch:
+            # What left its group, as `setsid` does, still has the
+            # session's marks.
+            from .mcp import reap
+            reap(self.scratch, keep=True)
         if self.scratch and self.scratch.exists():
             if self.keep:
                 print(f"shotbox: kept {self.scratch}")
