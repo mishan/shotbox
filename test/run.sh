@@ -208,6 +208,15 @@ with shotbox.Session(display=False) as s:
 left=$(for f in "$tmp/orphan" "$tmp/orphan2"; do p=$(cat "$f"); ! kill -0 "$p" 2>/dev/null || { echo "$p"; kill "$p"; }; done)
 [ -z "$left" ] && ok "a child in a session of its own stops with the session, from run and Python" \
   || fail "a child in a session of its own outlived the session: $left"
+# But a recording the session's end stops, whose keeper finishes its file
+# in a session of its own for that, finishes it.
+convert -size 1280x800 xc: +noise Random "$tmp/noise.png"
+"$sb" run -- sh -c "display -geometry +0+0 '$tmp/noise.png' & '$sb' wait window '.*noise.*' && { '$sb' record '$tmp/bg.gif' & sleep 8; }"
+n=0; while pgrep -f "keep_recording.*$tmp/bg.gif" >/dev/null && [ $n -lt 600 ]; do sleep 0.1; n=$((n + 1)); done
+frames=$(ffprobe -v error -count_frames -select_streams v -show_entries stream=nb_read_frames -of csv=p=0 \
+  "$tmp/bg.gif" 2>/dev/null || echo 0)
+[ "${frames:-0}" -ge 20 ] && ok "a recording finishing as its session ends finishes it" \
+  || fail "a recording finishing as its session ends: ${frames:-no} frames"
 names=$("$sb" run -- gdbus call --session --dest org.freedesktop.DBus \
   --object-path / --method org.freedesktop.DBus.ListActivatableNames)
 [ "$names" = "(['org.freedesktop.DBus'],)" ] && ok "nothing activatable on the bus" \
