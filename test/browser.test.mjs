@@ -962,6 +962,62 @@ test('mutated: what it can\'t change or prove, unapplied, and why; a clean run c
     }
 });
 
+test('mutated, when the page crashes or the browser is killed under the test: closing doesn\'t hang, nothing is left to throw, and what was proven stays so',
+     { skip: why }, async () =>
+{
+    const thrown = [];
+    const heard = (e) => thrown.push(String(e));
+
+    process.on('unhandledRejection', heard);
+    try
+    {
+        for (const end of ['crash', 'kill'])
+        {
+            const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'shotbox-test-'));
+            const server = await chromium.launchServer({ env: seal.env });
+            const own = await chromium.connect(server.wsEndpoint());
+
+            Object.assign(process.env, { SHOTBOX_MUTATION: JSON.stringify({ kind: 'hide', target: pay }),
+                                         SHOTBOX_MUTATION_REPORT: dir });
+            try
+            {
+                const context = await own.newContext();
+
+                await mutated(context);
+                const page = await context.newPage();
+                const read = async () => JSON.parse(await fs.readFile(path.join(dir, `${process.pid}.json`), 'utf8'));
+
+                await page.setContent(PAY);
+                await until(async () => (await read()).proven, 5000);
+                if (end === 'crash')
+                    await page.goto('chrome://crash').catch(() => {});
+                else
+                    server.process().kill('SIGKILL');
+                /* Long enough for the half-second looks to meet what's left. */
+                await new Promise((ok) => setTimeout(ok, 1500));
+                const started = Date.now();
+
+                await (end === 'crash' ? context.close() : own.close());
+                assert.deepEqual([end, await read(), Date.now() - started < 15000],
+                                 [end, { proven: true, why: '', made: true }, true]);
+            }
+            finally
+            {
+                delete process.env.SHOTBOX_MUTATION;
+                delete process.env.SHOTBOX_MUTATION_REPORT;
+                await server.close().catch(() => {});
+                await fs.rm(dir, { recursive: true, force: true });
+            }
+        }
+        await new Promise((ok) => setTimeout(ok, 500));
+        assert.deepEqual(thrown, []);
+    }
+    finally
+    {
+        process.off('unhandledRejection', heard);
+    }
+});
+
 test('shotbox mutate, end to end: a test that checks its page catches every change that should matter, and no other; one that checks nothing is blind to them; one that clicks where a button is drawn is brittle when it moves',
      { skip: why }, async () =>
 {

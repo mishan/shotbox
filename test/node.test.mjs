@@ -110,6 +110,36 @@ test('bumped changes the last digit of the first number, keeping its length', ()
         assert.equal(bumped(text), want, text);
 });
 
+test('bumped, over random texts: a text with a digit always changes, keeping its length and all but digits, from its first digit on, and reads one higher, or one lower where it was all nines', () =>
+{
+    let seed = 1;
+    const random = (n) => (seed = (seed * 48271) % 2147483647) % n;
+    const ALPHABET = '0123456789012345678901234567890123456789.,:\'\u00a0\u2009\u202f $-€abcxyz';
+
+    for (let i = 0; i < 20000; i++)
+    {
+        const text = Array.from({ length: random(16) }, () => ALPHABET[random(ALPHABET.length)]).join('');
+        const got = bumped(text);
+        const what = JSON.stringify([text, got]);
+
+        if (!/\d/.test(text))
+        {
+            assert.equal(got, null, what);
+            continue;
+        }
+        assert.equal(got?.length, text.length, what);
+        const changed = [...text].flatMap((c, at) => c === got[at] ? [] : [at]);
+
+        assert.ok(changed.length && changed.every((at) => /\d/.test(text[at]) && /\d/.test(got[at])), what);
+        const from = text.search(/\d/), to = changed.at(-1) + 1;
+        const value = (s) => BigInt(s.slice(from, to).replace(/\D/g, ''));
+        const was = text.slice(from, to).replace(/\D/g, '');
+
+        assert.ok(changed[0] >= from, what);
+        assert.equal(value(got) - value(text), /^9+$/.test(was) ? -1n : 1n, what);
+    }
+});
+
 test('gif cuts the start and keeps to the palette it is given',
      { skip: !has('ffmpeg') && 'no ffmpeg' }, async () =>
 {
