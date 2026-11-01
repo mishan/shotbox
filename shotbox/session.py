@@ -1470,6 +1470,12 @@ class Session(Screen):
             kill_group(proc)
         if self._xsettings:
             self._xsettings.close()
+        if self.scratch:
+            # What left its group, as `setsid` does, still has the
+            # session's marks; before the watchdog stands down, which
+            # finishes the job if a Ctrl-C cuts this short.
+            from .mcp import reap
+            reap(self.scratch, keep=True)
         if self._watch is not None:
             # Its processes stopped, the session needs no watchdog, and a
             # Ctrl-C cutting what's left short mustn't set it on a
@@ -1480,11 +1486,6 @@ class Session(Screen):
         for meter in (self._sampler, self._slice):
             if meter:
                 meter.close()
-        if self.scratch:
-            # What left its group, as `setsid` does, still has the
-            # session's marks.
-            from .mcp import reap
-            reap(self.scratch, keep=True)
         if self.scratch and self.scratch.exists():
             if self.keep:
                 print(f"shotbox: kept {self.scratch}")
