@@ -962,6 +962,33 @@ test('mutated: what it can\'t change or prove, unapplied, and why; a clean run c
     }
 });
 
+test('shotbox mutate, end to end: a test that checks its page catches every change that should matter, and no other; one that checks nothing is blind to them; one that clicks where a button is drawn is brittle when it moves',
+     { skip: why }, async () =>
+{
+    const here = path.dirname(new URL(import.meta.url).pathname);
+    const same = { 'size 1024x768': 'robust', 'size 1920x1080': 'robust', 'move button "Pay"': 'robust',
+                   'hide button "Pay"': 'caught', 'dead button "Pay"': 'caught', 'number button "Pay"': 'UNAPPLIED',
+                   'move text:/Total: .*/': 'robust', 'hide text:/Total: .*/': 'caught',
+                   'dead text:/Total: .*/': 'UNAPPLIED', 'number text:/Total: .*/': 'caught' };
+
+    for (const [test, status, unlike] of [
+        ['good', 0, {}],
+        ['blind', 1, { 'dead button "Pay"': 'BLIND', 'hide text:/Total: .*/': 'BLIND',
+                       'number text:/Total: .*/': 'BLIND' }],
+        ['brittle', 1, { 'move button "Pay"': 'BRITTLE', 'hide text:/Total: .*/': 'BLIND',
+                         'number text:/Total: .*/': 'BLIND' }],
+    ])
+    {
+        const run = spawnSync(path.join(here, '..', 'bin', 'shotbox'),
+            ['mutate', '--target', 'button "Pay"', '--target', 'text:/Total: .*/', '--json', '--',
+             'node', path.join(here, 'mutate', `${test}.mjs`)], { encoding: 'utf8', timeout: 900000 });
+        const { runs = [], suspect } = run.stdout ? JSON.parse(run.stdout) : {};
+
+        assert.deepEqual([test, run.status, suspect, Object.fromEntries(runs.map((r) => [r.label, r.verdict]))],
+                         [test, status, false, { ...same, ...unlike }], run.stderr);
+    }
+});
+
 test('film says where the loop starts, and gif cuts there',
      { skip: why || (!has('ffmpeg') && 'no ffmpeg') }, async () =>
 {
