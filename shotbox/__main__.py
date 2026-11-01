@@ -75,6 +75,13 @@ def seconds(s):
     return n
 
 
+def run_seconds(s):
+    n = float(s)
+    if not (math.isfinite(n) and 0 < n <= 86400):
+        raise argparse.ArgumentTypeError(f"seconds, more than 0, up to a day (86400), not {s}")
+    return n
+
+
 def size(s):
     w, h = s.lower().split("x")
     return int(w), int(h)
@@ -271,7 +278,7 @@ def cmd_mutate(argv):
     p.add_argument("--confirm", type=int, default=1, metavar="N",
                    help="reruns a failure on a change that shouldn't matter needs, "
                         "to be BRITTLE (1)")
-    p.add_argument("--timeout", type=seconds, metavar="S",
+    p.add_argument("--timeout", type=run_seconds, metavar="S",
                    help="stop a run after S seconds (by default, a changed run after 3 "
                         "times the slower clean run, at least 30, and the first two clean "
                         "runs never)")

@@ -555,7 +555,7 @@ test('mutated makes the target dead to what the test does to it, by button, link
             frame, act, on: what.endsWith('tapped') ? touch : browser, look: (page) => Promise.all(page.frames().map((f) => f.title())) });
 
         assert.deepEqual([what, report, errors, saw.filter(Boolean)],
-                         [what, { proven: true, why: '', made: true }, [], []]);
+                         [what, { proven: true, why: '', made: true, used: true }, [], []]);
     }
 
     const total = { by: 'text', name: 'Total: 42.50' };
@@ -941,9 +941,10 @@ test('mutated: what it can\'t change or prove, unapplied, and why; a clean run c
     const { report, errors, saw } = await mutation(clean, `${PAY}<button id="twin" hidden>Pay</button>`,
         { done: (r) => r.seen?.[0], look: (page) => showing(page, 'button') });
 
-    assert.deepEqual([report, errors, saw], [{ seen: [true, false, false] }, [], 1]);
-    assert.deepEqual((await mutation(clean, [PAY, '<p>Paid</p>'], { done: () => false })).report,
-                     { seen: [true, false, false] }, 'seen in a context closed at once');
+    assert.deepEqual([report.seen, errors, saw], [[true, false, false], [], 1]);
+    assert.match(report.bad[2], /'#pay\[' is not a valid selector/);
+    assert.deepEqual((await mutation(clean, [PAY, '<p>Paid</p>'], { done: () => false })).report.seen,
+                     [true, false, false], 'seen in a context closed at once');
 
     const context = await browser.newContext();
 
@@ -1077,6 +1078,23 @@ test('shotbox mutate, end to end: a test that checks its page catches every chan
 
         assert.deepEqual([test, run.status, suspect, Object.fromEntries(runs.map((r) => [r.label, r.verdict]))],
                          [test, status, false, { ...same, ...unlike }], run.stderr);
+    }
+
+    /* A test that catches the change and dies before it's proven, and
+       targets that can't be found, said as such before any change. */
+    const mutate = (...args) => spawnSync(path.join(here, '..', 'bin', 'shotbox'), ['mutate', ...args],
+        { encoding: 'utf8', timeout: 900000 });
+    const hasty = mutate('--target', 'text:/Total: .*/', '--kinds', 'number', '--json', '--',
+                         'node', path.join(here, 'mutate', 'hasty.mjs'));
+
+    assert.deepEqual([hasty.status, JSON.parse(hasty.stdout || '{"runs":[]}').runs.map((r) => r.verdict)],
+                     [0, ['caught']], hasty.stderr);
+    for (const [target, said] of [['css:#[', /css:#\[ isn't one the page can read: .*not a valid selector/],
+                                  ['text:/Total/', /didn't both find text:\/Total\/ \(a regex matches all/]])
+    {
+        const run = mutate('--target', target, '--kinds', 'hide', '--', 'node', path.join(here, 'mutate', 'good.mjs'));
+
+        assert.match(`${run.status} ${run.stderr}`, new RegExp(`^2 [^]*${said.source}`), target);
     }
 });
 
