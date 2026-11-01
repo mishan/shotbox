@@ -962,6 +962,41 @@ test('mutated: what it can\'t change or prove, unapplied, and why; a clean run c
     }
 });
 
+test('mutated loads a big page about as fast in a changed run as in a clean one, so a test fails on the change, not on the time it takes',
+     { skip: why }, async () =>
+{
+    const BIG = `<body><script>for (let i = 0; i < 20000; i++)
+        { const b = document.createElement('button'); b.textContent = 'B' + i; document.body.append(b); }
+        const p = document.createElement('button'); p.textContent = 'Pay'; document.body.prepend(p)</script>`;
+    const took = {};
+
+    for (const spec of [{ kind: null, targets: [pay] }, { kind: 'hide', target: pay }])
+    {
+        const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'shotbox-test-'));
+        const context = await browser.newContext();
+
+        Object.assign(process.env, { SHOTBOX_MUTATION: JSON.stringify(spec), SHOTBOX_MUTATION_REPORT: dir });
+        try
+        {
+            await mutated(context);
+            const page = await context.newPage();
+            const started = Date.now();
+
+            /* As many tests load theirs. */
+            await page.setContent(BIG);
+            took[spec.kind ?? 'clean'] = Date.now() - started;
+        }
+        finally
+        {
+            delete process.env.SHOTBOX_MUTATION;
+            delete process.env.SHOTBOX_MUTATION_REPORT;
+            await context.close();
+            await fs.rm(dir, { recursive: true, force: true });
+        }
+    }
+    assert.ok(took.hide < took.clean + 1500, JSON.stringify(took));
+});
+
 test('mutated, when the page crashes or the browser is killed under the test: closing doesn\'t hang, nothing is left to throw, and what was proven stays so',
      { skip: why }, async () =>
 {

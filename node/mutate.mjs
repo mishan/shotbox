@@ -393,7 +393,10 @@ function inPage ({ spec, binding, undos }, number, bumped)
         const sources = [
             () => ids && ids.split(/\s+/).map((id) => root.getElementById?.(id)?.textContent ?? '').join(' '),
             () => el.getAttribute('aria-label'),
-            () => FIELDS.has(el.localName) && el.labels && [...el.labels].map((l) => l.textContent).join(' '),
+            /* `labels` searches the whole page, so only where one could
+               be: around it, or pointing at its id. */
+            () => FIELDS.has(el.localName) && (el.id || el.closest('label')) && el.labels
+                  && [...el.labels].map((l) => l.textContent).join(' '),
             () => (el.localName === 'img' || el.type === 'image') && el.getAttribute('alt'),
             () => el.localName === 'input' && ['button', 'submit', 'reset'].includes(el.type)
                   && (el.value || DEFAULTS[el.type]),
