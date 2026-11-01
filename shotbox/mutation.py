@@ -158,6 +158,8 @@ def mutate(cmd, targets, kinds=None, confirm=1, timeout=None, only=None, save=No
     once more clean at the end; a MutationReport. Raises Unusable if the
     clean runs fail, write no report, or never find a target."""
     kinds = kinds.split(",") if isinstance(kinds, str) else kinds
+    if confirm < 1:
+        raise SessionError(f"confirm={confirm}: a BRITTLE needs at least one rerun to confirm it")
     runs = plan(targets, list(MATTERS) if kinds is None else kinds, only)
     if save and Path(save).exists() and any(Path(save).iterdir()):
         raise SessionError(f"--save {save}: it has files in it already, which a run's "

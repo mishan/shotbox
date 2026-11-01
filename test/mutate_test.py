@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from shotbox.mutation import merged, target, verdict  # noqa: E402
+from shotbox.mutation import merged, mutate, target, verdict  # noqa: E402
 from shotbox.screen import SessionError  # noqa: E402
 
 fails = 0
@@ -93,5 +93,12 @@ for what, reports, want in [
 ]:
     got = merged(reports)
     check(got == want, f"merged, {what}: {got}")
+
+# A BRITTLE needs a rerun to confirm it.
+try:
+    mutate(["true"], ['button "Pay"'], confirm=0)
+    check(False, "confirm=0 taken")
+except SessionError as e:
+    check("confirm" in str(e), f"confirm=0 refused: {e}")
 
 sys.exit(fails)

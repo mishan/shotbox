@@ -7,6 +7,7 @@
     shotbox spawn --session NAME -- COMMAND...      run a program in a lasting session
     shotbox stop NAME | shotbox sessions            stop one; list them
     shotbox term [options] -- COMMAND...            a terminal to take pictures of
+    shotbox mutate --target T [options] -- TEST...  a browser test against changes to its page
     shotbox wait window|port|file|ready|stable|announce|node|match|change [ARG]
     shotbox wait line RE FILE                       (inside a session) wait for it
     shotbox capture OUT.png [--window RE] [--burst N]  (inside a session) take a picture
