@@ -1493,7 +1493,11 @@ MARKS = (b"SHOTBOX_MCP", b"SHOTBOX_SCRATCH", b"XDG_RUNTIME_DIR", b"HOME")
 
 def ours(environ, root):
     """Whether an environment (/proc's, NUL-separated) is a session's under
-    `root`: one of MARKS is `root` or a path in it."""
+    `root`: one of MARKS is `root` or a path in it. Not a command put in it
+    from outside with --session, which is its caller's, and ends on its own
+    as the session does, as a recording finishes its file."""
+    if b"SHOTBOX_ENTERED=1" in environ.split(b"\0"):
+        return False
     for entry in environ.split(b"\0"):
         key, _, value = entry.partition(b"=")
         if key in MARKS and (value == root or value.startswith(root + b"/")):
