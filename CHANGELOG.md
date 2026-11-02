@@ -24,6 +24,14 @@
   already did when killed outright, a lasting session started inside it
   too; but not a recording's keeper finishing its file, nor a command
   put in it from outside with `--session`.
+- A program that doesn't answer the accessibility bus (busy, or hung)
+  is said not to by every `a11y` and `wait node` command that gives up,
+  `; program 1234 didn't answer: busy, or hung`, not taken for a window
+  that isn't there, a node that isn't, or no focus; `lint` and
+  `contrast` without `--window` fail with status 2, not all checked
+  (Python's and MCP's raise), rather than finding nothing wrong. Each
+  ends a second past its `--timeout`: libatspi gave such a program 15
+  seconds first, so `tree` and `lint` took 16 with `--timeout 2`.
 
 ## 0.10.0 — 2026-10-23
 
