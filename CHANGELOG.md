@@ -24,6 +24,11 @@
   already did when killed outright, a lasting session started inside it
   too; but not a recording's keeper finishing its file, nor a command
   put in it from outside with `--session`.
+- With `--usage`, a recording still finishing its file as its session
+  ended was cut off, leaving an empty or unfinished file and no error: the session's
+  slice was stopped with the recording's keeper in it. The keeper, and
+  what it started, now go to a scope of their own first, and finish as
+  they do without `--usage`.
 - A program that doesn't answer the accessibility bus (busy, or hung)
   is said not to by every `a11y` and `wait node` command that gives up,
   `; program 1234 didn't answer: busy, or hung`, not taken for a window
