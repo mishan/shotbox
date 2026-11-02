@@ -224,8 +224,12 @@ if command -v ffmpeg >/dev/null && command -v display >/dev/null && command -v c
   n=0; while pgrep -f "keep_recording.*$tmp/bg.gif" >/dev/null && [ $n -lt 1800 ]; do sleep 0.1; n=$((n + 1)); done
   frames=$(ffprobe -v error -count_frames -select_streams v -show_entries stream=nb_read_frames -of csv=p=0 \
     "$tmp/bg.gif" 2>/dev/null || echo 0)
-  [ "${frames:-0}" -ge 20 ] && ok "a recording finishing as its session ends finishes it" \
-    || fail "a recording finishing as its session ends: ${frames:-no} frames"
+  if k=$(pgrep -f "keep_recording.*$tmp/bg.gif"); then
+    fail "a recording finishing as its session ends was still finishing 3 minutes on"; kill $k
+  else
+    [ "${frames:-0}" -ge 20 ] && ok "a recording finishing as its session ends finishes it" \
+      || fail "a recording finishing as its session ends: ${frames:-no} frames"
+  fi
 else
   echo "skip  a recording finishing as its session ends: no ffmpeg, or no ImageMagick"
 fi
