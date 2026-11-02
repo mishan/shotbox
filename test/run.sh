@@ -217,19 +217,25 @@ f=$(cat "$tmp/finishing"); n=0; while kill -0 "$f" 2>/dev/null && [ $n -lt 150 ]
 ! kill -0 "$f" 2>/dev/null && ok "a session killed outright stops what would finish on its own" \
   || { fail "a session killed outright left what would finish on its own"; kill "$f"; }
 # And a recording the session's end stops, whose keeper finishes its file
-# in a session of its own for that, finishes it.
+# in a session of its own for that, finishes it; with --usage, outside the
+# slice the session's end stops.
 if command -v ffmpeg >/dev/null && command -v display >/dev/null && command -v convert >/dev/null; then
   convert -size 1280x800 xc: +noise Random "$tmp/noise.png"
-  "$sb" run -- sh -c "display -geometry +0+0 '$tmp/noise.png' & '$sb' wait window '.*noise.*' && { '$sb' record '$tmp/bg.gif' & sleep 8; }"
-  n=0; while pgrep -f "keep_recording.*$tmp/bg.gif" >/dev/null && [ $n -lt 1800 ]; do sleep 0.1; n=$((n + 1)); done
-  frames=$(ffprobe -v error -count_frames -select_streams v -show_entries stream=nb_read_frames -of csv=p=0 \
-    "$tmp/bg.gif" 2>/dev/null || echo 0)
-  if k=$(pgrep -f "keep_recording.*$tmp/bg.gif"); then
-    fail "a recording finishing as its session ends was still finishing 3 minutes on"; kill $k
-  else
-    [ "${frames:-0}" -ge 20 ] && ok "a recording finishing as its session ends finishes it" \
-      || fail "a recording finishing as its session ends: ${frames:-no} frames"
-  fi
+  for u in "" --usage; do
+    rm -f "$tmp/bg.gif"
+    "$sb" run $u -- sh -c "display -geometry +0+0 '$tmp/noise.png' & '$sb' wait window '.*noise.*' && { '$sb' record '$tmp/bg.gif' & sleep 8; }" 2> "$tmp/bg.err"
+    n=0; while pgrep -f "keep_recording.*$tmp/bg.gif" >/dev/null && [ $n -lt 1800 ]; do sleep 0.1; n=$((n + 1)); done
+    frames=$(ffprobe -v error -count_frames -select_streams v -show_entries stream=nb_read_frames -of csv=p=0 \
+      "$tmp/bg.gif" 2>/dev/null || echo 0)
+    what="a recording finishing as its session ends${u:+ (with $u)}"
+    if [ -n "$u" ] && ! grep -q "(cgroup" "$tmp/bg.err"; then
+      echo "skip  $what: no slice of the user's systemd"
+    elif k=$(pgrep -f "keep_recording.*$tmp/bg.gif"); then
+      fail "$what was still finishing 3 minutes on"; kill $k
+    else
+      [ "${frames:-0}" -ge 20 ] && ok "$what finishes it" || fail "$what: ${frames:-no} frames"
+    fi
+  done
 else
   echo "skip  a recording finishing as its session ends: no ffmpeg, or no ImageMagick"
 fi
