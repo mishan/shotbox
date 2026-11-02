@@ -1506,6 +1506,20 @@ def ours(environ, root, spare=False):
     return False
 
 
+def finishing(root):
+    """The pids of what reap(root, spare=True) leaves to end on its own."""
+    mark, found = str(root).encode(), []
+    for d in Path("/proc").glob("[0-9]*"):
+        try:
+            environ = (d / "environ").read_bytes()
+            if (d.stat().st_uid == os.getuid() and ours(environ, mark)
+                    and not ours(environ, mark, spare=True)):
+                found.append(int(d.name))
+        except OSError:     # gone, or not ours to read
+            continue
+    return found
+
+
 def reap(root, keep=False, grace=5, spare=False):
     """Stop every process of ours that is a session's under `root`, until
     none is left: TERM, so a recording finishes its file, and KILL for what

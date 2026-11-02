@@ -1483,9 +1483,11 @@ class Session(Screen):
             os.write(self._watch, b"stopped")
             os.close(self._watch)
             self._watch = None
-        for meter in (self._sampler, self._slice):
-            if meter:
-                meter.close()
+        if self._sampler:
+            self._sampler.close()
+        if self._slice:
+            from .mcp import finishing
+            self._slice.close(lambda: finishing(self.scratch))
         if self.scratch and self.scratch.exists():
             if self.keep:
                 print(f"shotbox: kept {self.scratch}")
