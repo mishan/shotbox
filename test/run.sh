@@ -1560,6 +1560,46 @@ assert j['notes'] and all('not shown' in n['note'] for n in j['notes']), j" "$tm
       && ok "a11y: contrast, GTK 4 from 4.14: text where it's found, a stack's too; not a popover or an edge, said" \
       || { fail "a11y: contrast, GTK 4 from 4.14 ($st)"; cat "$tmp/contrast"; }
   fi
+  # A program that doesn't answer, stopped: each command that reads the
+  # tree says so, by 1 s past its timeout, from the command line and
+  # Python, rather than that a window or node isn't there, or that it
+  # found nothing wrong. A window each, stopped just before: half a
+  # minute on, the bus drops it.
+  cat > "$tmp/hung.sh" <<'EOF'
+sb=$1; here=$2; out=$3; app=
+timed() {
+  [ -z "$app" ] || { kill -CONT $app; kill $app; wait $app; }
+  "$here/gtk4_window.py" & app=$!
+  "$sb" wait node Save >/dev/null || { echo "9999 0 no window" >> "$out"; return; }
+  kill -STOP $app
+  s=$(date +%s%N); "$@" > "$out.got" 2>&1; st=$?
+  echo "$(( ($(date +%s%N) - s) / 1000000 )) $st $app $*: $(tail -1 "$out.got")" >> "$out"
+}
+speak=$(command -v orca >/dev/null && echo "a11y speak")
+for w in "" gtk4-old; do
+  for c in "a11y lint" "a11y click Save" "a11y scroll Save 1" "a11y contrast" "a11y tabwalk" \
+      ${speak:+"$speak"} "wait node Save" ${w:+"a11y tree"}; do
+    timed "$sb" $c --timeout 2 ${w:+--window $w}
+  done
+  pw=None; [ -z "$w" ] || pw="'$w'"
+  for c in "wait_node('Save'" "click_node('Save'"; do
+    timed env PYTHONPATH="$here/.." python3 -c "import shotbox; shotbox.Screen().$c, window=$pw, timeout=2)"
+  done
+done
+timed "$sb" a11y tree --timeout 2
+kill -CONT $app; kill $app
+echo end >> "$out"
+EOF
+  : > "$tmp/hung"
+  "$sb" run --a11y -- sh "$tmp/hung.sh" "$sb" "$here" "$tmp/hung" >/dev/null 2>&1 || true
+  # Its tree says so, and goes on: a listing, not a failure; lint and
+  # contrast fail as not all checked.
+  late=$(awk '/^end$/ { next } $1 > 3000 || ($2 == 0) != / a11y tree --timeout 2: / ||
+    / a11y (lint|contrast) --timeout 2: / && $2 != 2 ||
+    !index($0, $3 ") didn'"'"'t answer: busy, or hung") && !index($0, $3 " didn'"'"'t answer: busy, or hung")' "$tmp/hung")
+  [ "$(tail -1 "$tmp/hung")" = end ] && [ -z "$late" ] \
+    && ok "a11y: a program that doesn't answer is said not to, by 1 s past the timeout" \
+    || { fail "a11y: a program that doesn't answer"; echo "${late:-nothing ran}"; }
   # The window's own buttons, out of the Tab order, left out by name.
   "$sb" run --a11y -- sh -c "'$app' & '$sb' a11y tabwalk --window a11y-test \
     --ignore 'button \"(Minimize|Maximize|Close)\"'" > "$tmp/walk" \
