@@ -228,10 +228,10 @@ if command -v ffmpeg >/dev/null && command -v display >/dev/null && command -v c
     frames=$(ffprobe -v error -count_frames -select_streams v -show_entries stream=nb_read_frames -of csv=p=0 \
       "$tmp/bg.gif" 2>/dev/null || echo 0)
     what="a recording finishing as its session ends${u:+ (with $u)}"
-    if [ -n "$u" ] && ! grep -q "(cgroup" "$tmp/bg.err"; then
-      echo "skip  $what: no slice of the user's systemd"
-    elif k=$(pgrep -f "keep_recording.*$tmp/bg.gif"); then
+    if k=$(pgrep -f "keep_recording.*$tmp/bg.gif"); then
       fail "$what was still finishing 3 minutes on"; kill $k
+    elif [ -n "$u" ] && ! grep -q "(cgroup" "$tmp/bg.err"; then
+      echo "skip  $what: no slice of the user's systemd"
     else
       [ "${frames:-0}" -ge 20 ] && ok "$what finishes it" || fail "$what: ${frames:-no} frames"
     fi

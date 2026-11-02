@@ -172,9 +172,10 @@ class Slice:
                                        str(pid), "Description", "s",
                                        "what a shotbox session left to finish", "0"],
                                       stdout=subprocess.DEVNULL,
-                                      stderr=subprocess.DEVNULL).returncode == 0:
+                                      stderr=subprocess.DEVNULL,
+                                      timeout=max(end - time.monotonic(), 0.1)).returncode == 0:
                         moved.add(pid)
-                except OSError:
+                except (OSError, subprocess.TimeoutExpired):
                     pass
             time.sleep(0.05)
         sys.stderr.write("shotbox: what was still finishing as the session ended, a recording "
