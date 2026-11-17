@@ -60,6 +60,10 @@ CONTAINERS = ("SCROLL_PANE", "LIST", "LIST_BOX", "TREE", "TREE_TABLE", "TABLE",
 # draws as it is.
 TEXTS = ("LABEL", "HEADING", "LINK", "STATIC", "CAPTION", "TEXT", "PARAGRAPH")
 
+# What draws its name, for contrast, and what's a picture.
+NAMED = ("LABEL", "HEADING", "LINK", "STATIC", "CAPTION")
+IMAGES = ("IMAGE", "ICON")
+
 # Controls that draw no text of their own, whatever their name. What WCAG
 # asks of them is their parts against what's round them, not anything in
 # their own box, so contrast leaves them out.
@@ -2008,6 +2012,17 @@ def unready(Atspi, screen, n, point, at, shown):
     return None
 
 
+def windowed(pairs):
+    """The nodes of `pairs`, (depth, Node), each with `_win`, the index of
+    its window's node: the nearest at depth 0 before it, as a saved tree
+    has them too."""
+    nodes = []
+    for depth, n in pairs:
+        n["_win"] = len(nodes) if depth == 0 else nodes[-1]._win
+        nodes.append(n)
+    return nodes
+
+
 def ident(acc):
     """What tells `acc` from the rest, as a Node's `_id` does."""
     return f"{acc.app.bus_name if acc.app else ''}{acc.path}"
@@ -2038,11 +2053,10 @@ def modals(Atspi, nodes):
     def inside(path, outer):
         return path == outer or path.startswith(outer + "/")
 
-    tops = {ident(n._top): n.path for n in nodes if n._acc == n._top}
     content = {}
     for n in nodes:
-        if n._acc != n._top and n.path.rsplit("/", 1)[0] == tops.get(ident(n._top)):
-            content.setdefault(ident(n._top), n.bounds)
+        if nodes[n._win] is not n and n.path.rsplit("/", 1)[0] == nodes[n._win].path:
+            content.setdefault(n._win, n.bounds)
     paths = {n.path: n for n in nodes}
     siblings = {}
     for n in nodes:
@@ -2055,33 +2069,33 @@ def modals(Atspi, nodes):
         """Whether `o` is a layer over its window's content: as big as it,
         and after something as big, showing and another object (not a
         stack's page GTK lists twice, nor a banner folded away)."""
-        size = (content.get(ident(o._top)) or [])[2:] if o else None
+        size = (content.get(o._win) or [])[2:] if o else None
         if not size or not o.bounds or o.bounds[2:] != size:
             return False
         up, step = o.path.rsplit("/", 1)
         at = int(re.search(r"\[(\d+)\]$", step)[1])
         before = at and siblings.get((up, at - 1))
         return bool(before and before._showing and before.bounds
-                    and before.bounds[2:] == size and before._id != o._id)
+                    and before.bounds[2:] == size)
 
     def layered(n):
         """Whether `n` is libadwaita's dialog: a layer itself (1.10's, and
         1.5's alert dialog), or 1.5's sheet, three down from its layer."""
-        return layer(n) or (n._role == Atspi.Role.DIALOG
+        return layer(n) or (n.role == "dialog"
                             and n.path.endswith("/panel[0]/panel[0]/dialog[1]")
                             and layer(paths.get(n.path.rsplit("/", 3)[0])))
 
-    dialogs = roles(Atspi, ("DIALOG", "ALERT"))
+    dialogs = role_names(("DIALOG", "ALERT"))
     fronts = {}
     for i, n in enumerate(nodes):
-        if (n._acc == n._top or n._role not in dialogs or not n._showing or not n.bounds
+        if (nodes[n._win] is n or n.role not in dialogs or not n._showing or not n.bounds
                 or not all(n.bounds[2:])):
             continue
         under = "modal" not in n.states and gtk4(n) and layered(n)
         if "modal" not in n.states and not under:
             continue
-        scope = next((o.path for o in reversed(nodes[:i]) if o._role == Atspi.Role.DOCUMENT_WEB
-                      and inside(n.path, o.path)), tops.get(ident(n._top)))
+        scope = next((o.path for o in reversed(nodes[:i]) if o.role == "document web"
+                      and inside(n.path, o.path)), nodes[n._win].path)
         if scope not in fronts or not inside(n.path, fronts[scope][0].path):
             # libadwaita 1.5 names its dialog's node nothing: said by the first
             # name in it, which is its title if it shows one.
@@ -2108,7 +2122,7 @@ def modals(Atspi, nodes):
         except Exception:   # gone while we looked: a window closing
             continue
         behind.update({n.path: front for n in nodes if front and n._top.app
-                       and n._top.app.bus_name == bus and ident(n._top) != front._id})
+                       and n._top.app.bus_name == bus and nodes[n._win]._id != front._id})
     return behind
 
 
@@ -2145,14 +2159,13 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
         screen.park()
     finally:
         screen.close()
-    nodes = [n for _, n in walk(Atspi, window, timeout, bounds=True)]
+    nodes = windowed(walk(Atspi, window, timeout, bounds=True))
     fronts = modals(Atspi, nodes)
-    texts, controls = roles(Atspi, TEXTS), roles(Atspi, CONTROLS)
-    named = roles(Atspi, ("LABEL", "HEADING", "LINK", "STATIC", "CAPTION"))
-    images, textless, edged = (roles(Atspi, ("IMAGE", "ICON")), roles(Atspi, TEXTLESS),
-                               roles(Atspi, EDGED))
+    texts, controls = role_names(TEXTS), role_names(CONTROLS)
+    named = role_names(NAMED)
+    images, textless, edged = role_names(IMAGES), role_names(TEXTLESS), role_names(EDGED)
     # A link draws its text, as other controls may not.
-    unworded = (controls - {int(Atspi.Role.LINK)}) | images
+    unworded = (controls - {"link"}) | images
     parents = {n.path: n for n in nodes}
     ids = {n._id: n for n in nodes}
     layers = {}
@@ -2180,13 +2193,13 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
         whose text is its static children's, nor a control or image,
         measured as one."""
         if n.path not in worded:
-            if n._top not in kits:
-                kits[n._top] = toolkit(n)
-            text = ("/document web[" in n.path and n._role not in unworded and (
-                n._role == Atspi.Role.STATIC or kits[n._top] != "Chromium")
+            if n._win not in kits:
+                kits[n._win] = toolkit(n)
+            text = ("/document web[" in n.path and n.role not in unworded and (
+                n.role == "static" or kits[n._win] != "Chromium")
                 and contents(Atspi, n) or "").replace("\ufffc", "")
             worded[n.path] = any(c.isalnum() for c in text) and not any(
-                o._role == Atspi.Role.STATIC and o.name.strip() and o.name.strip() in text
+                o.role == "static" and o.name.strip() and o.name.strip() in text
                 for o in kids.get(n.path, ()))
         return worded[n.path]
 
@@ -2287,11 +2300,11 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
         if (not n._showing or not (n.name or wording(n)) or "editable" in n.states
                 or re.search(r"/document web\[\d+\]/(.*/)?canvas\[\d+\](/|$)", n.path)
                 or disabled(n)
-                or n._role in textless or gtk3_switch(Atspi, n)):
+                or n.role in textless or gtk3_switch(Atspi, n)):
             return None
-        if n._role in images:
+        if n.role in images:
             return "graphics"
-        return "text" if n._role in texts or n._role in controls or wording(n) else None
+        return "text" if n.role in texts or n.role in controls or wording(n) else None
 
     def shown(n):
         """`n`'s bounds cut to its window's and every node's it's inside, or
@@ -2464,7 +2477,7 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
         while more and "/" in path:
             path = path.rsplit("/", 1)[0]
             up = parents.get(path)
-            if not up or up._acc == n._top:
+            if not up or up is nodes[n._win]:
                 break
             got = spare(up, child, gtk4_release(n) >= (4, 14, 6))
             if got is None:
@@ -2488,7 +2501,7 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
         while area and all(area[2:]) and "/" in path:
             path = path.rsplit("/", 1)[0]
             up = parents.get(path)
-            if up and up._role == Atspi.Role.SCROLL_PANE:
+            if up and up.role == "scroll pane":
                 area = overlap(area, room(up) or area)
         return bool(area) and not all(area[2:])
 
@@ -2517,7 +2530,7 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
         if o.name and not any(t.get_name() == o.name
                               for t in related(Atspi, o._acc, "LABELLED_BY")):
             got.append(o.name)
-        if "editable" in o.states or o._role in named:
+        if "editable" in o.states or o.role in named:
             try:
                 got.append(Atspi.Text.get_text(o._acc, 0, -1) or "")
             except Exception:   # no text, or gone since the walk
@@ -2734,7 +2747,7 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
             if not (within(o.path, of.path) or within(of.path, o.path))
             and room(o) and overlap(room(o), mid) == mid
             for s in texts_of(o) + ([""] if blank and o.path not in kids
-                                    and o._role not in named else [])
+                                    and o.role not in named else [])
             if not s or t.lower() in s.lower())[::-1]]
 
     def drawn_apart(o, t, kinds, box, until, alone=False):
@@ -2796,7 +2809,7 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
         while "/" in path:
             path = path.rsplit("/", 1)[0]
             up = parents.get(path)
-            if up and up._role == Atspi.Role.SCROLL_PANE and overlap(area, room(up) or area) != area:
+            if up and up.role == "scroll pane" and overlap(area, room(up) or area) != area:
                 return None
         # Covering no pixel whole, text measures as the color its coverage
         # steps toward, as far again as its most covered pixel is short.
@@ -2812,13 +2825,13 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
     def searched(n):
         """Whether `n`'s text is looked for where it's drawn: GTK 4's, from
         4.14."""
-        return (n._role in texts and n._role not in controls and gtk4(n)
+        return (n.role in texts and n.role not in controls and gtk4(n)
                 and gtk4_release(n) >= (4, 14) and not trusted)
 
     def placeable(n):
         """Whether `n` is a graphic GTK 4 places wrong, and borrowed() may
         place: from 4.14.6, whose text says where it's laid out."""
-        return (n._role in controls and gtk4(n) and gtk4(n) not in GTK4_BOUNDS
+        return (n.role in controls and gtk4(n) and gtk4(n) not in GTK4_BOUNDS
                 and gtk4_release(n) >= (4, 14, 6) and not trusted)
 
     # Where each node measured is, or GTK 4's text can be, cut to the
@@ -2953,7 +2966,7 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
         box = [b[0] + dx, b[1] + dy, b[2], b[3]]
         # A scroll pane is where GTK says or as far as `n` further: in it
         # wherever it is, `n` is in it both ways.
-        panes = [o.bounds for o in nodes if o._role == Atspi.Role.SCROLL_PANE
+        panes = [o.bounds for o in nodes if o.role == "scroll pane"
                  and within(n.path, o.path) and o.bounds]
         if shown(n) != b or any(overlap(box, q) != box or overlap(
                 box, [q[0] + dx, q[1] + dy, *q[2:]]) != box for q in panes):
@@ -2993,7 +3006,7 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
         span = [b[0] + xs[0], b[1] + ys[0], b[2] + len(xs) - 1, b[3] + len(ys) - 1] \
             if xs and ys else b
         if any(overlap(span, q) != span or overlap(b, q) != b for q in (
-                o.bounds for o in nodes if o._role == Atspi.Role.SCROLL_PANE
+                o.bounds for o in nodes if o.role == "scroll pane"
                 and within(n.path, o.path) and o.bounds)):
             return "partly out of view"
         return None
@@ -3117,7 +3130,7 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
         if (not version or version in GTK4_BOUNDS or inside and k != "edge" and not popover
                 or trusted):
             return False
-        text = n._role in texts and k == "text" and not (cannot or inside)
+        text = n.role in texts and k == "text" and not (cannot or inside)
         short = (" (a single letter: GTK gives it no width)" if text and lone(n) else
                  " (over more than one line)" if text and "\n" in n.name else
                  " (not all ASCII: GTK measures its width short)" if text and unsure(n) else
@@ -3132,15 +3145,15 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
                "docs/accessibility.md." if inside else
                f"GTK {version} reports where its widgets are wrong, so text is measured where "
                f"it's found drawn near there, by its name in its font, but shotbox {cannot}; "
-               "see docs/accessibility.md." if n._role in texts and k == "text" and cannot else
+               "see docs/accessibility.md." if n.role in texts and k == "text" and cannot else
                f"GTK {version} reports where its widgets are wrong, so text is measured where "
                "it's found drawn near there, by its name in its font, but a single letter "
                "isn't: GTK gives it no width to check; see docs/accessibility.md."
-               if n._role in texts and k == "text" and lone(n) else
+               if n.role in texts and k == "text" and lone(n) else
                f"GTK {version} reports where its widgets are wrong, so text is measured where "
                "it's found drawn near there, by its name in its font, but not text over more "
                "than one line; see docs/accessibility.md."
-               if n._role in texts and k == "text" and "\n" in n.name else
+               if n.role in texts and k == "text" and "\n" in n.name else
                f"GTK {version} reports where its widgets are wrong, so text is measured where "
                "it's found drawn near there, by its name in its font, and nothing there matched "
                "it well enough: text drawn otherwise than its name and font say (in another "
@@ -3172,11 +3185,11 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
                "one isn't drawn; see docs/accessibility.md." if case == "twin" else
                f"GTK {version} reports where its widgets are wrong, so text is measured where "
                "it's found drawn near there, by its name in its font, and this wasn't found "
-               "there; see docs/accessibility.md." if n._role in texts and k == "text"
+               "there; see docs/accessibility.md." if n.role in texts and k == "text"
                and not unsure(n) else
                f"GTK {version} reports where its widgets are wrong, and how wide text that "
                "isn't all ASCII is, so this can't be told from its name drawn by something "
-               "else nearby; see docs/accessibility.md." if n._role in texts and k == "text" else
+               "else nearby; see docs/accessibility.md." if n.role in texts and k == "text" else
                f"GTK {version} reports where a widget's content starts, not its edge, and a "
                "stack's child with its place in the stack counted twice, so what isn't text "
                "can't be measured from what it reports; see docs/accessibility.md."
@@ -3197,7 +3210,7 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
         k = kind(n)
         # GTK 4 puts a label in a control that draws text, so one with none
         # draws an icon: a graphic, held to graphics' ratio.
-        if n._role in controls and gtk4(n):
+        if n.role in controls and gtk4(n):
             k = "graphics"
         if covered(n, k):
             continue
@@ -3273,7 +3286,7 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
         elif got is None and lent:
             wrong(n, k, "nothing drawn inside where it's found" if n.path in sought
                   else "nothing drawn where text near it puts it")
-        elif got is None and (k == "text" or n._role in controls):
+        elif got is None and (k == "text" or n.role in controls):
             # What it draws can be past the screen's edge: right-aligned text.
             if cut:
                 notes.append((n, f"{k} not measured: partly outside the screen"))
@@ -3281,7 +3294,7 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
             back = picture.hex_of(pic.colors(box).most_common(1)[0][0])
             # A control can be drawn only when the pointer's over it: a tab's
             # close button. Say how it is then, to tell.
-            over = n._role in controls and picture.text_contrast(hovered(box), box)
+            over = n.role in controls and picture.text_contrast(hovered(box), box)
             then = (f"; with the pointer over it, {ratio_text(over[0])}:1, "
                     f"{picture.hex_of(over[1])} on {picture.hex_of(over[2])} ({at})"
                     if over else "")
@@ -3417,7 +3430,7 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
                 whys.append(why)
     if edges:
         kinds = [n for n in nodes if n._showing and (
-            n._role in edged or (n._role == Atspi.Role.TEXT and "editable" in n.states))
+            n.role in edged or (n.role == "text" and "editable" in n.states))
             and not gtk3_switch(Atspi, n)]
         edging = [n for n in kinds if not disabled(n) and not covered(n, "edge")]
         late = [n for n in kinds if gtk4(n) and gtk4(n) not in GTK4_BOUNDS
@@ -3436,7 +3449,7 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
             got = box and picture.edge_contrast(pic, box)
             count += bool(got)
             # A field's edge can be what it's in: a frame's.
-            field = n._role in (Atspi.Role.TEXT, Atspi.Role.COMBO_BOX)
+            field = n.role in ("text", "combo box")
             if not got:
                 continue
             colors = (f"{ratio_text(got[0])}:1, {picture.hex_of(got[1])} by "
@@ -3465,7 +3478,7 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
                 problems.append((n, f"edge {colors}"))
     said = problems + passes + notes + behind
     for d in nodes:
-        if (d._role == Atspi.Role.DOCUMENT_WEB and d._showing
+        if (d.role == "document web" and d._showing
                 and not any(within(n.path, d.path) for n, _ in said)
                 and any(o._showing and (contents(Atspi, o) or "").replace("\ufffc", "").strip()
                         for o in nodes if within(o.path, d.path))):

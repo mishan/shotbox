@@ -1226,14 +1226,17 @@ if atspi; then
     && grep -q '/panel\[6\]: focusable panel with no name$' "$tmp/lint" \
     && ok "a11y: lint finds the icon button, the image and the drawing area with no name" \
     || { fail "a11y: lint ($st)"; cat "$tmp/lint"; }
-  # Lint knows roles by the names libatspi gives them, as a saved tree has
-  # them: each role it lists is named as libatspi names it.
+  # Lint and contrast know roles by the names libatspi gives them, as a
+  # saved tree has them: each role they list is named as libatspi names it.
   out=$(PYTHONPATH="$here/.." python3 -c "import gi; gi.require_version('Atspi', '2.0')
 from gi.repository import Atspi
-from shotbox.a11y import CONTAINERS, CONTROLS, role_names
-print(*[r for r in CONTROLS + CONTAINERS + ('TEXT', 'IMAGE') if hasattr(Atspi.Role, r)
-        and Atspi.role_get_name(getattr(Atspi.Role, r)) not in role_names((r,))])")
-  [ -z "$out" ] && ok "a11y: lint names each role it lists as libatspi does" || fail "a11y: lint's role names: $out"
+from shotbox.a11y import CONTAINERS, CONTROLS, EDGED, IMAGES, NAMED, TEXTLESS, TEXTS, role_names
+print(*[r for r in CONTROLS + CONTAINERS + TEXTS + NAMED + IMAGES + TEXTLESS + EDGED + (
+            'TEXT', 'IMAGE', 'DOCUMENT_WEB', 'SCROLL_PANE', 'DIALOG', 'ALERT', 'COMBO_BOX')
+        if hasattr(Atspi.Role, r) and Atspi.role_get_name(getattr(Atspi.Role, r))
+        not in role_names((r,))])")
+  [ -z "$out" ] && ok "a11y: lint and contrast name each role they list as libatspi does" \
+    || fail "a11y: lint's and contrast's role names: $out"
   "$sb" run --a11y -- sh -c "'$app' & FORCE_COLOR=1 '$sb' a11y lint --window a11y-test" > "$tmp/lintc" || true
   grep -q "^${esc}\[2m.*/image\[5\]${esc}\[0m: image with no name" "$tmp/lintc" \
     && ok "a11y: lint, at a terminal, dims each node's path" || { fail "a11y: lint's color"; cat -v "$tmp/lintc"; }
