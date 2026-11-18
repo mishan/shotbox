@@ -1032,6 +1032,23 @@ for c in "flip 30 1 ^flicker: 200x120[+]0[+]0, .* every [1-5][0-9] ms, (#000000 
 done
 [ -z "$flickered" ] && ok "flicker: switching every 30 ms, not every 500; a flash; a strip; not a still window, motion, scrolling, a line or an edge; a sheet of each" \
   || fail "flicker:$flickered"
+# --frames keeps the watch: each picture that changed, a PNG of what's
+# watched, at its time, in order, and how many were taken; a directory
+# that isn't empty is refused before watching.
+set +e; "$sb" run -- sh -c "'$here/window.py' fl flip 30 & '$sb' wait window fl >/dev/null &&
+  '$sb' flicker --window fl --seconds 1.6 --frames '$tmp/watched'" > "$tmp/watched.out"; st=$?
+"$sb" run -- sh -c "'$sb' flicker --seconds 1.6 --frames '$tmp/watched'" > /dev/null 2> "$tmp/watched.err"; again=$?
+set -e
+[ $st = 1 ] && [ $again = 2 ] && grep -q "isn't empty" "$tmp/watched.err" \
+  && python3 -c "import json, subprocess, sys; d = sys.argv[1]; m = json.load(open(d + '/frames.json'))
+f = m['frames']; ats = [x['at'] for x in f]
+assert m['version'] == 1 and m['seconds'] == 1.6 and m['size'] == [200, 120], m
+assert len(f) > 20 and m['taken'] >= len(f) and ats == sorted(set(ats)) and ats[0] >= 0, m
+sizes = subprocess.run(['identify', '-format', '%w %h\n', *(d + '/' + x['file'] for x in f)],
+                       capture_output=True, text=True, check=True).stdout.split('\n')[:-1]
+assert set(sizes) == {'200 120'} and len(sizes) == len(f), sizes" "$tmp/watched" \
+  && ok "flicker --frames keeps each picture that changed, and when; not over another watch" \
+  || { fail "flicker --frames ($st, $again)"; cat "$tmp/watched.out" "$tmp/watched.err"; ls "$tmp/watched" | head || true; }
 
 # chords LOG [SESSION OPTIONS]: Shift in a chord, into cat in a terminal:
 # the symbol on the key's shifted level, as on a keyboard (A, !, +), and

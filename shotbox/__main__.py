@@ -1091,6 +1091,9 @@ def cmd_flicker(argv):
     p.add_argument("--save", metavar="DIR",
                    help="a sheet of each one's pictures here, made if it isn't: its box and "
                         "a tile round it, magnified, each labeled with its time")
+    p.add_argument("--frames", metavar="DIR",
+                   help="keep the watch in DIR, new or empty, for --from: each picture that "
+                        "changed, as a PNG, and when")
     a = p.parse_args(argv)
     if not (a.seconds > 0 and a.brief > 0 and a.times >= 2 and a.tile >= 1 and a.fuzz >= 0):
         p.error("--seconds, --brief and --tile are more than 0, --times 2 or more, --fuzz 0 "
@@ -1098,7 +1101,7 @@ def cmd_flicker(argv):
     try:
         found, taken, changed = inside().flicker(
             a.seconds, window=a.window, crop=a.crop, tile=a.tile, brief=a.brief / 1000,
-            times=a.times, fuzz=a.fuzz, ignore=a.ignore, save=a.save)
+            times=a.times, fuzz=a.fuzz, ignore=a.ignore, save=a.save, frames=a.frames)
     except SessionError as e:
         sys.stderr.write(f"shotbox: {e}\n")
         return 2

@@ -36,6 +36,7 @@ is, drawn anew each picture, never the same.
 
 import functools
 import math
+import json
 import operator
 import subprocess
 import tempfile
@@ -672,3 +673,32 @@ def _sheet(out, shots, ks, end, size, box, margin):
                            input=b"".join(data[(y * width + x0) * 3:(y * width + x1) * 3]
                                           for y in range(y0, y1)), check=True)
         return x.sheet(cells, out, across=across)
+
+
+def png(path, width, height, rgb):
+    """`rgb`, width * height * 3 bytes, as a PNG at `path`, written here,
+    as fast as a watch's frames need: each row unfiltered, compressed
+    little."""
+    def chunk(kind, data):
+        return (len(data).to_bytes(4, "big") + kind + data
+                + zlib.crc32(kind + data).to_bytes(4, "big"))
+    row = width * 3
+    rows = b"".join(b"\0" + rgb[y * row:(y + 1) * row] for y in range(height))
+    Path(path).write_bytes(b"\x89PNG\r\n\x1a\n"
+                           + chunk(b"IHDR", width.to_bytes(4, "big") + height.to_bytes(4, "big")
+                                   + bytes([8, 2, 0, 0, 0]))
+                           + chunk(b"IDAT", zlib.compress(rows, 1)) + chunk(b"IEND", b""))
+
+
+def keep(out, shots, size, seconds, taken):
+    """A watch, `shots` (at, zlib-compressed rgb) of a picture `size`, in the
+    directory `out`, for `flicker --from`: each frame a PNG, then
+    frames.json, last, so a watch kept only in part has none."""
+    out, digits = Path(out), len(str(len(shots)))
+    names = []
+    for n, (at, data) in enumerate(shots, 1):
+        names.append({"file": f"frame-{n:0{digits}d}.png", "at": at})
+        png(out / names[-1]["file"], *size, zlib.decompress(data))
+    (out / "frames.json").write_text(json.dumps({"version": 1, "seconds": seconds,
+                                                 "taken": taken, "size": list(size),
+                                                 "frames": names}))

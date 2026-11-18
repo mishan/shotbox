@@ -548,7 +548,7 @@ class Screen:
         return at, *place
 
     def flicker(self, seconds=2.0, window=None, crop=None, tile=16, brief=0.1, times=8,
-                fuzz=6.0, ignore=(), save=None):
+                fuzz=6.0, ignore=(), save=None, frames=None):
         """Watch the display, or the window named `window`, cropped, for
         `seconds`, as fast as pictures come, for flicker and flashes (see
         flicker.py): tiles `tile` pixels square, a state no longer than
@@ -557,8 +557,10 @@ class Screen:
         left out. [dict(kind="flicker" or "flash", box, at, changes,
         every, looks)], a box of tiles each, in order, how many pictures
         were taken, and how many of them changed. With `save`, a directory,
-        each one's pictures there as a sheet (see `_sheet`), its path its
-        "sheet", or "unsaved" if it couldn't be written."""
+        each one's pictures there as a sheet (see `flicker._sheet`), its
+        path its "sheet", or "unsaved" if it couldn't be written. With
+        `frames`, a directory, new or empty, the watch kept there, before
+        it's looked at, for `flicker --from` (see `flicker.keep`)."""
         from . import flicker
         w = self.window(window) if window else None
         geometry = r"(\d+)x(\d+)\+(\d+)\+(\d+)"
@@ -574,16 +576,24 @@ class Screen:
             if not m:
                 self.fail(f"what to ignore is WIDTHxHEIGHT+X+Y, not {g}")
             skip.append(tuple(int(n) for n in m.groups()))
-        if save is not None:
-            if not str(save):
+        for d in (save, frames):
+            if d is None:
+                continue
+            if not str(d):
                 self.fail("a directory to save to, not ''")
             try:
-                Path(save).mkdir(parents=True, exist_ok=True)
-                tempfile.TemporaryFile(dir=save).close()
+                Path(d).mkdir(parents=True, exist_ok=True)
+                tempfile.TemporaryFile(dir=d).close()
             except (FileExistsError, NotADirectoryError):
-                self.fail(f"can't save to {save}: it, or a directory it's in, is a file")
+                self.fail(f"can't save to {d}: it, or a directory it's in, is a file")
             except OSError as e:
-                self.fail(f"can't save to {save}: {e.strerror}")
+                self.fail(f"can't save to {d}: {e.strerror}")
+        if frames is not None:
+            # Not over another watch: one part of each would be read as one.
+            if any(Path(frames).iterdir()):
+                self.fail(f"{frames} isn't empty: --frames keeps a watch in a new directory")
+            if save is not None and Path(save).resolve() == Path(frames).resolve():
+                self.fail("--frames and --save are two directories")
         fd, png = tempfile.mkstemp(".png", dir=self.env["SHOTBOX_SCRATCH"])
         os.close(fd)
 
@@ -624,6 +634,11 @@ class Screen:
             Path(png).unlink(missing_ok=True)
         if not shots:
             self.fail(f"no picture taken in {seconds:g} s")
+        if frames is not None:
+            try:
+                flicker.keep(frames, shots, size, seconds, taken)
+            except OSError as e:
+                self.fail(f"can't keep the watch in {frames}: {e.strerror}")
         return flicker.watch(shots, size, seconds, taken, tile, brief, times, fuzz, skip, save,
                              compressed=True)
 
