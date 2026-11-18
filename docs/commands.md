@@ -445,7 +445,7 @@ Pictures that came fewer than two to a `--brief` are said: a look that
 brief may be missed, and something moving through taken for a flash.
 
 `--frames DIR` keeps the watch in DIR, made if it isn't there and
-refused if it isn't empty or is `--save`'s: each picture that changed
+refused if it isn't empty, or is or holds `--save`'s: each picture that changed
 as a PNG of what was watched, and `frames.json`, which says when each
 was taken (`at`, in seconds from the start, the middle of taking it,
 so the last can be a little past the watch's end), how long the watch

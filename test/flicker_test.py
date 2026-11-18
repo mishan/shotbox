@@ -150,8 +150,13 @@ for case, frames in [
         check(False, f"watch(): {case}: no error")
     except ValueError as e:
         check(True, f"watch(): {case}: {e}")
+# Pixels as any bytes-like, counted in bytes: a memoryview of 2-byte items.
+wide = [(at, memoryview(rgb).cast("H")) for at, rgb in flips([0.03] * 60)]
+check(said(wide) == flicker30, "pixels as a memoryview of 2-byte items, counted in bytes")
+
 for case, size, kw in [
     ("a size of none", (0, 5), {}), ("a size that isn't whole", (W + 0.5, H), {}),
+    ("a size that's one number", 5, {}),
     ("no seconds", (W, H), {"seconds": 0}), ("a tile of none", (W, H), {"tile": 0}),
     ("a box to ignore as written", (W, H), {"ignore": ["16x16+16+0"]}),
 ]:
@@ -225,6 +230,8 @@ for case, kw, said in [
     ("no frames", {"manifest": json.dumps(dict(GOOD, frames=[]))}, "isn't what"),
     ("a time that's a bool", {"manifest": json.dumps(dict(GOOD, frames=[
         {"file": "f1.png", "at": True}]))}, "isn't what"),
+    ("a time too big for a float", {"manifest": json.dumps(dict(GOOD, frames=[
+        {"file": "f1.png", "at": 10 ** 400}]))}, "isn't what"),
     ("a picture named as ImageMagick's own", {"manifest": json.dumps(dict(GOOD, frames=[
         {"file": "xc:red", "at": 0.0}]))}, "isn't what"),
     ("a picture that isn't there", {"manifest": json.dumps(dict(GOOD, frames=[
@@ -256,7 +263,8 @@ check(r.returncode == 2 and "can't read" in r.stderr and "session" not in r.stde
       f"flicker --from '': read, not a live watch ({r.stderr!r})")
 st, out, err = cli(kept(TWO), "--ignore", "big")
 check(st == 2 and "what to ignore is WIDTHxHEIGHT+X+Y" in err, f"flicker --from: a bad --ignore ({err!r})")
-for flag in (["--window", "w"], ["--crop", "1x1+0+0"], ["--seconds", "1"], ["--frames", str(tmp / "f")]):
+for flag in (["--window", "w"], ["--window", ""], ["--crop", ""], ["--crop", "1x1+0+0"],
+             ["--seconds", "1"], ["--frames", str(tmp / "f")]):
     st, out, err = cli(kept(TWO), *flag)
     check(st == 2 and "takes no --window, --crop, --seconds or --frames" in err,
           f"flicker --from: no {flag[0]} ({err!r})")

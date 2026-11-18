@@ -370,9 +370,9 @@ def watch(frames, size, seconds, taken=None, tile=16, brief=0.1, times=8, fuzz=6
     that isn't; no frames; a time below 0, not after the one before, or
     past the watch's end but for the last's (taken as the watch ended); a
     frame of the wrong number of bytes."""
-    def number(v):
-        return type(v) in (int, float) and math.isfinite(v)
-    if not (len(size) == 2 and all(type(v) is int and v >= 1 for v in size)):
+    number = finite
+    if not (isinstance(size, (tuple, list)) and len(size) == 2
+            and all(type(v) is int and v >= 1 for v in size)):
         raise ValueError(f"a size is (width, height), each 1 or more, not {size!r}")
     if not (number(seconds) and seconds > 0) or not (type(tile) is int and tile >= 1):
         raise ValueError(f"seconds is more than 0 and tile 1 or more, not {seconds!r}, {tile!r}")
@@ -394,12 +394,12 @@ def watch(frames, size, seconds, taken=None, tile=16, brief=0.1, times=8, fuzz=6
                                  "after the one before, all but the last within the watch")
             before = at
             try:
-                if len(data) != width * height * 3:
-                    raise ValueError(f"frame {given}: {len(data)} bytes, not "
-                                     f"{width * height * 3}, for {width}x{height}")
                 data = bytes(data)
             except TypeError:
                 raise ValueError(f"frame {given}: its pixels aren't bytes") from None
+            if len(data) != width * height * 3:
+                raise ValueError(f"frame {given}: {len(data)} bytes, not "
+                                 f"{width * height * 3}, for {width}x{height}")
             if data != last:
                 shots.append((at, zlib.compress(data, 1)))
                 last = data
@@ -718,9 +718,20 @@ def keep(out, shots, size, seconds, taken):
     for n, (at, data) in enumerate(shots, 1):
         names.append({"file": f"frame-{n:0{digits}d}.png", "at": at})
         png(out / names[-1]["file"], *size, zlib.decompress(data))
-    (out / "frames.json").write_text(json.dumps({"version": 1, "seconds": seconds,
-                                                 "taken": taken, "size": list(size),
-                                                 "frames": names}))
+    # Whole or not there: a manifest cut short isn't one.
+    part = out / "frames.json.part"
+    part.write_text(json.dumps({"version": 1, "seconds": seconds, "taken": taken,
+                                "size": list(size), "frames": names}))
+    part.replace(out / "frames.json")
+
+
+def finite(v):
+    """Whether `v` is a number a time can be: an int or float, not a bool,
+    finite (a whole number too big for a float isn't)."""
+    try:
+        return type(v) in (int, float) and math.isfinite(v)
+    except OverflowError:
+        return False
 
 
 def ready(ignore, save=None, frames=None):
@@ -767,8 +778,7 @@ def kept(d):
     except ValueError:
         m = None
 
-    def number(v):
-        return type(v) in (int, float) and math.isfinite(v)
+    number = finite
     if not (isinstance(m, dict) and m.get("version") == 1 and number(m.get("seconds"))
             and m["seconds"] > 0 and isinstance(m.get("size"), list) and len(m["size"]) == 2
             and all(type(v) is int and v >= 1 for v in m["size"])

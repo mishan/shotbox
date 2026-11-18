@@ -1099,8 +1099,8 @@ def cmd_flicker(argv):
                    help="look at the watch --frames kept in DIR, not the screen: needs no "
                         "session")
     a = p.parse_args(argv)
-    if a.kept is not None and (a.window or a.crop or a.seconds is not None
-                               or a.frames is not None):
+    if a.kept is not None and (a.window is not None or a.crop is not None
+                               or a.seconds is not None or a.frames is not None):
         p.error("--from is a watch already kept: it takes no --window, --crop, --seconds or "
                 "--frames")
     if a.kept is not None:
@@ -1115,11 +1115,14 @@ def cmd_flicker(argv):
                 "or more")
     try:
         if a.kept is not None:
+            ignore = flicker.ready(a.ignore, a.save)
+            # Checked as a script's step is, once its kept watch is read.
+            if getattr(playing, "checking", False):
+                raise Checked
             try:
                 found, taken, changed = flicker.watch(
                     frames, size, a.seconds, taken, tile=a.tile, brief=a.brief / 1000,
-                    times=a.times, fuzz=a.fuzz, ignore=flicker.ready(a.ignore, a.save),
-                    save=a.save)
+                    times=a.times, fuzz=a.fuzz, ignore=ignore, save=a.save)
             except OSError as e:
                 raise ValueError(f"can't run ImageMagick: {e.strerror or e}") from None
         else:
