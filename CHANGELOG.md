@@ -29,9 +29,16 @@
   are notes, measured live only.
 - `a11y contrast` takes a role by libatspi's name for it too, so on an
   older libatspi a toolkit's own switch is left out as a switch is.
+- `flicker --frames DIR` keeps the watch, each picture that changed and
+  when, and `flicker --from DIR` looks at it again with no session or
+  display: the same lines, warnings and exit status as live. In Python,
+  `shotbox.flicker.watch(frames, size, seconds)` does it on frames in
+  memory, for a test with frames made by hand at exact times.
 
 ### Fixed
 
+- `flicker` failed with a traceback when it took no picture, or when the
+  window it watched changed size; it now says so, exit 2.
 - `wait idle` passed after a single look that listed no window, so a busy
   program whose window one listing missed (sway's, for an Xwayland window)
   wasn't waited for. It now looks three rounds in a row, as for a program.

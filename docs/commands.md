@@ -357,7 +357,7 @@ or a pointer of its own, as an emulator draws.
 
 ## flicker
 
-`shotbox flicker [--window RE] [--crop G] [--seconds 2]` watches for a
+`shotbox flicker [--window RE] [--crop G] [--seconds 2] [--frames DIR | --from DIR]` watches for a
 part of the screen that keeps switching between two looks, or flashes
 another once and comes back, and fails (1) if one does: a strip of the
 buffer a game isn't showing, say, or a frame drawn black. Not being able
@@ -443,6 +443,27 @@ that can't be written is said, and what was found is still printed.
 The last line, how many pictures were taken, is printed whatever's found.
 Pictures that came fewer than two to a `--brief` are said: a look that
 brief may be missed, and something moving through taken for a flash.
+
+`--frames DIR` keeps the watch in DIR, made if it isn't there and
+refused if it isn't empty or is `--save`'s: each picture that changed
+as a PNG of what was watched, and `frames.json`, which says when each
+was taken (`at`, in seconds from the start, the middle of taking it,
+so the last can be a little past the watch's end), how long the watch
+was (`seconds`), how many pictures were taken (`taken`, changed or not)
+and their `size`. They're written once the watch is over, before it's
+looked at, `frames.json` last: a watch kept only in part has none. On
+disk that's one picture a change, little compressed, so a crop is
+smaller and quicker than the whole screen.
+
+`--from DIR` looks at a kept watch again, with no session or display
+(ImageMagick reads the PNGs): the same lines, warnings and exit status
+as the live watch, given the same options. It takes
+`--tile`, `--brief`, `--times`, `--fuzz`, `--ignore` and `--save`, to
+look at it another way, but not `--window`, `--crop`, `--seconds` or
+`--frames`, which decide what's watched. A test can write a watch by
+hand, with exact times, or call `shotbox.flicker.watch()` on frames in
+memory ([Python](python.md)). A `frames.json` or PNG that isn't one is
+said, exit 2.
 
 ## exec
 
