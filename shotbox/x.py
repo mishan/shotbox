@@ -826,9 +826,15 @@ def kept_png(path, size=None):
         return None
     if got.returncode or size and (w, h) != tuple(size):
         return None
-    data = subprocess.run([*CONVERT, path, "-alpha", "off", "-depth", "8", "rgb:-"],
+    # The size again from what's decoded, which the file can have changed
+    # under since it was asked.
+    data = subprocess.run([*CONVERT, path, "-alpha", "off", "-depth", "8", "ppm:-"],
                           capture_output=True)
-    return (w, h, data.stdout) if not data.returncode and len(data.stdout) == w * h * 3 else None
+    try:
+        got = ppm(data.stdout) if not data.returncode else None
+    except ValueError:
+        return None
+    return got if got and got[:2] == (w, h) and len(got[2]) == w * h * 3 else None
 
 
 def box_of(geometry):

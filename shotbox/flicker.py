@@ -720,9 +720,12 @@ def keep(out, shots, size, seconds, taken):
         png(out / names[-1]["file"], *size, zlib.decompress(data))
     # Whole or not there: a manifest cut short isn't one.
     part = out / "frames.json.part"
-    part.write_text(json.dumps({"version": 1, "seconds": seconds, "taken": taken,
-                                "size": list(size), "frames": names}))
-    part.replace(out / "frames.json")
+    try:
+        part.write_text(json.dumps({"version": 1, "seconds": seconds, "taken": taken,
+                                    "size": list(size), "frames": names}))
+        part.replace(out / "frames.json")
+    finally:
+        part.unlink(missing_ok=True)
 
 
 def finite(v):

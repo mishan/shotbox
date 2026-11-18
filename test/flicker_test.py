@@ -248,6 +248,15 @@ for case, kw, said in [
     check(st == 2 and not out and said in err and "Traceback" not in err,
           f"flicker --from: {case}, said ({st}, {err!r})")
 
+# A manifest that can't be put in place leaves no part of one behind.
+d = Path(tempfile.mkdtemp(dir=tmp))
+(d / "frames.json").mkdir()
+try:
+    flicker.keep(d, [(0.0, zlib.compress(strip(BLACK)))], (W, H), 1.0, 1)
+    check(False, "a manifest that can't be put in place: no error")
+except OSError:
+    check(not (d / "frames.json.part").exists(), "a manifest that can't be put in place: no part left")
+
 # --save inside --frames is refused before either is touched past being
 # made, so --frames stays empty to try again.
 d = Path(tempfile.mkdtemp(dir=tmp))

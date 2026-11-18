@@ -1103,22 +1103,30 @@ def cmd_flicker(argv):
                                or a.seconds is not None or a.frames is not None):
         p.error("--from is a watch already kept: it takes no --window, --crop, --seconds or "
                 "--frames")
+    checking = getattr(playing, "checking", False)
     if a.kept is not None:
         try:
             frames, size, a.seconds, taken = flicker.kept(a.kept)
         except ValueError as e:
+            if checking:
+                raise SessionError(str(e)) from None
             sys.stderr.write(f"shotbox: {e}\n")
             return 2
     a.seconds = 2 if a.seconds is None else a.seconds
     if not (a.seconds > 0 and a.brief > 0 and a.times >= 2 and a.tile >= 1 and a.fuzz >= 0):
         p.error("--seconds, --brief and --tile are more than 0, --times 2 or more, --fuzz 0 "
                 "or more")
+    # A script's step, checked: what it reads, its kept watch and options,
+    # but nothing it would write.
+    if a.kept is not None and checking:
+        try:
+            flicker.ready(a.ignore)
+        except ValueError as e:
+            raise SessionError(str(e)) from None
+        raise Checked
     try:
         if a.kept is not None:
             ignore = flicker.ready(a.ignore, a.save)
-            # Checked as a script's step is, once its kept watch is read.
-            if getattr(playing, "checking", False):
-                raise Checked
             try:
                 found, taken, changed = flicker.watch(
                     frames, size, a.seconds, taken, tile=a.tile, brief=a.brief / 1000,

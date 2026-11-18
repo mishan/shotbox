@@ -1062,6 +1062,15 @@ for c in "flip 30 1" "flash 40 1" "still - 0"; do
     || { fail "flicker --from, against live ($1: $st, $from)"
          { diff "$d.out" "$d.from"; diff "$d.err" "$d.ferr"; } || true; }
 done
+# A script's steps are checked before any plays: a kept watch read, but
+# no --save made, and one that isn't there stops the script.
+printf 'flicker --from %s --save %s\nflicker --from %s\n' "$tmp/kept-flip" "$tmp/play-sheets" \
+  "$tmp/play-none" > "$tmp/play-kept"
+set +e; "$sb" run -- "$sb" play "$tmp/play-kept" > /dev/null 2> "$tmp/play-kept.err"; st=$?; set -e
+[ $st != 0 ] && grep -q "2: can't read $tmp/play-none/frames.json" "$tmp/play-kept.err" \
+  && [ ! -e "$tmp/play-sheets" ] \
+  && ok "play: a flicker --from step checked first, writing nothing; one with no kept watch stops it" \
+  || { fail "play, flicker --from ($st)"; cat "$tmp/play-kept.err"; }
 
 # chords LOG [SESSION OPTIONS]: Shift in a chord, into cat in a terminal:
 # the symbol on the key's shifted level, as on a keyboard (A, !, +), and
