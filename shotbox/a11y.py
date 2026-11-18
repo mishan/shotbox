@@ -2903,6 +2903,11 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
     # caught doesn't hang on how long measuring takes.
     sampler = threading.Thread(target=sample, daemon=True)
     sampler.start()
+    for n in measured:
+        if "_run" not in n and kind(n) == "text" and large_text(Atspi, n):
+            n["_large"] = True
+        if "_run" not in n and not n.bounds and undrawn(Atspi, n):
+            n["_drawn"] = False
     found, late, hidden = {}, set(), set()
     cannot = None
     until = time.monotonic() + SEARCH
@@ -3259,7 +3264,7 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
                 whys.append(why)
             continue
         big = k == "text" and (large_run(n._look, False) if "_run" in n
-                               else large_text(Atspi, n))
+                               else n.get("_large", False))
         least = large if big else text if k == "text" else graphics
         at = f"at least {least:g}" + (", large text" if big else "")
         if seen and n.path in doubt:
@@ -3293,7 +3298,7 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
         if not seen and wrong(n, k, why):
             continue
         if not n.bounds:
-            if "_run" in n or not undrawn(Atspi, n):
+            if "_run" in n or n.get("_drawn", True):
                 problems.append((n, f"{k} not measured: can't tell where it is"))
             continue
         box = seen[0] if seen else shown(n)
