@@ -835,6 +835,12 @@ cat "$tmp/lint.log"
 fails=$((fails + $(grep -c '^FAIL' "$tmp/lint.log" || true)))
 [ $st = 0 ] || grep -q "^FAIL" "$tmp/lint.log" || fail "lint_test.py: status $st"
 
+# a11y contrast --from, on trees and pictures made by hand: no display or bus.
+set +e; python3 "$here/contrast_test.py" "$sb" > "$tmp/contrastf.log" 2>&1; st=$?; set -e
+cat "$tmp/contrastf.log"
+fails=$((fails + $(grep -c '^FAIL' "$tmp/contrastf.log" || true)))
+[ $st = 0 ] || grep -q "^FAIL" "$tmp/contrastf.log" || fail "contrast_test.py: status $st"
+
 # shotbox mutate's targets and verdicts.
 set +e; python3 "$here/mutate_test.py" > "$tmp/mutate.log" 2>&1; st=$?; set -e
 cat "$tmp/mutate.log"
