@@ -1550,7 +1550,7 @@ assert not [k for n in t for k in n if k.startswith('_')], t
 assert p['version'] == 1 and len(p['samples']) == 5, p
 assert all(os.path.exists(d + '/' + f['file']) for f in [{'file': p['screen']}] + p['samples']), p" \
     "$tmp/saved" && ok "a11y: contrast --save keeps what it read of each node, and its pictures" \
-    || { fail "a11y: contrast --save"; cat "$tmp/contrast2"; ls -l "$tmp/saved"; }
+    || { fail "a11y: contrast --save"; cat "$tmp/contrast2"; ls -l "$tmp/saved" || true; }
   # --from what --save wrote says what the live run said, with no session:
   # GTK 3, with --edges, and another program that doesn't answer; text
   # blinking, and moving; a GTK 4 window behind a modal. GTK 4's own are

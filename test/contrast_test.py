@@ -4,6 +4,7 @@ rule says: no display, accessibility bus or PyGObject (its import is
 blocked): test/contrast_test.py SHOTBOX."""
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -77,7 +78,7 @@ def contrast(nodes, screen, *args, samples=(), hovers=(), pictures=None, tree=No
                      for i, (_, x, y) in enumerate(samples, 1)],
          "hovers": [{"file": f"hover-{i}.png", "box": list(b)} for i, (b, _) in enumerate(hovers, 1)]}))
     r = subprocess.run([sb, "a11y", "contrast", "--from", str(d), *args], capture_output=True,
-                       text=True, env={"PATH": "/usr/bin:/bin", "PYTHONPATH": str(tmp)})
+                       text=True, env={"PATH": os.environ["PATH"], "PYTHONPATH": str(tmp)})
     return r.returncode, r.stdout.splitlines(), r.stderr
 
 
@@ -124,6 +125,10 @@ for case, nodes, screen, args, want in [
     ("behind a modal dialog in its window",
      [W, label(), node("frame/dialog[1]", "dialog", "Settings", ["modal"], bounds=[0, 0, 200, 100])],
      FAINT, [], (0, ['frame/label[0]: text behind a modal dialog "Settings"'])),
+    ("a GTK 4 dialog that isn't a layer, under a box as big as its window",
+     [window(toolkit="GTK 4.16.3"), node("frame/panel[0]", "panel", bounds=[0, 0, 200, 100]),
+      node("frame/panel[0]/panel[0]", "panel", bounds=[0, 0, 200, 100]),
+      node("frame/panel[0]/panel[0]/dialog[1]", "dialog", "D", bounds=BOX)], FAINT, [], (0, [])),
     ("ignored by its path", [W, label()], FAINT, ["--ignore", r"^frame/label\["], (0, [])),
     ("ignored by its tree line", [W, label()], FAINT, ["--ignore", '^label "Hi"'], (0, [])),
     ("GTK 4's, a note", [window(toolkit="GTK 4.16.3"), label()], FAINT, [],
@@ -236,6 +241,13 @@ for case, kw, said in [
     st, out, err = contrast([W, label()], FAINT, **kw)
     check(st == 2 and not out and said in err and "Traceback" not in err,
           f"contrast --from: {case}, said ({st}, {err!r})")
+
+(tmp / "full").mkdir()
+(tmp / "full" / "tree.json").write_text("[]")
+r = subprocess.run([sb, "a11y", "contrast", "--save", str(tmp / "full")], capture_output=True,
+                   text=True)
+check(r.returncode == 2 and "isn't empty" in r.stderr and (tmp / "full" / "tree.json").read_text() == "[]",
+      f"contrast --save: into a directory that isn't empty, refused before it's touched ({r.stderr!r})")
 
 for flag in (["--window", "w"], ["--save", str(tmp / "again")]):
     r = subprocess.run([sb, "a11y", "contrast", "--from", str(tmp), *flag], capture_output=True,

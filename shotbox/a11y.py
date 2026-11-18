@@ -2072,7 +2072,7 @@ def modals(nodes):
         """Whether `o` is a layer over its window's content: as big as it,
         and after something as big, showing and another object (not a
         stack's page GTK lists twice, nor a banner folded away)."""
-        size = (content.get(o._win) or [])[2:] if o else None
+        size = (content.get(o._win) or [])[2:] if o and nodes[o._win] is not o else None
         if not size or not o.bounds or o.bounds[2:] != size:
             return False
         up, step = o.path.rsplit("/", 1)
@@ -2262,7 +2262,9 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
         coordinates for text start elsewhere than for its nodes, so it's
         asked in the screen's, taken to the walk's bounds. Right to left
         text, which may be drawn in another order, is asked of whole."""
-        acc, text, out, i, boxes = n._acc, n.get("_contents", ""), [], 0, {}
+        # Read again, with the boxes: it can have changed since.
+        acc, text, out, i, boxes = n._acc, contents(Atspi, n) or "", [], 0, {}
+        n["_contents"] = text
         try:
             e = acc.get_extents(Atspi.CoordType.SCREEN)
         except Exception:   # gone since the walk
@@ -3586,7 +3588,7 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
             if why not in whys:
                 whys.append(why)
     if keep is not None:
-        keep.update(nodes=nodes, first=first, shots=shots, hovers=hovers, window=window)
+        keep.update(nodes=nodes, first=first, shots=shots, hovers=hovers)
     notes = [(n, what) for n, what in notes if not skip(n, what)]
     # What's scrolled out of view isn't there to measure, as GTK 3's and
     # browsers' rows aren't, which aren't said at all.
@@ -3868,13 +3870,14 @@ def dom(Atspi, n):
               **({"text": text[:40] + "…" * (len(text) > 40)} if text else {})})
 
 
-def save_contrast(out, kept):
+def save_contrast(out, kept, unchecked):
     """Write to the directory `out` what contrast(keep=) kept: tree.json,
     the tree with what was read of each node live, each field only where
     it isn't the default (but never what's typed in a field), and
     pictures.json, which names the PNGs: the first picture of the screen,
     each sample and where it's from, and each control not seen with the
-    pointer over it, only its box."""
+    pointer over it, only its box. With `unchecked`, the live run is not
+    all checked, and so is the saved one."""
     out = Path(out)
     try:
         out.mkdir(parents=True, exist_ok=True)
@@ -3909,12 +3912,13 @@ def save_contrast(out, kept):
             if "_color" in n:
                 got["color"] = picture.hex_of(n._color)
             if "_runs" in n:
-                got["runs"] = [{"run": r._run, "look": r._look, "bounds": r.bounds, **placed_at(r)}
+                got["runs"] = [{"run": r._run, "look": r._look, "bounds": r.bounds, **placed_at(r),
+                                **({"color": picture.hex_of(r._color)} if "_color" in r else {})}
                                for r in n._runs]
             tree.append({**got, **placed_at(n)})
         # A program that didn't answer, where the live run says so: then
         # --from does too.
-        if CUT or QUIET and (not kept["window"] or quiet_owns(kept["window"])):
+        if unchecked:
             tree += [{"role": "application", "name": "", "description": "", "states": [],
                       "path": "application", "depth": 0, "pid": pid, "quiet": True,
                       "bounds": None} for pid in sorted(QUIET)]
@@ -4224,7 +4228,9 @@ def saved(path):
                 and isinstance(r.get("look"), dict)
                 and all(isinstance(k, str) and isinstance(v, str) for k, v in r["look"].items())
                 and (r.get("bounds") is None or box(r["bounds"]))
-                and isinstance(r.get("text", ""), str) and element(r.get("dom", {"tag": ""})))
+                and isinstance(r.get("text", ""), str) and element(r.get("dom", {"tag": ""}))
+                and isinstance(r.get("color", "#000000"), str)
+                and re.fullmatch(r"#[0-9a-f]{6}", r.get("color", "#000000")))
 
     def element(el):
         return (isinstance(el, dict) and isinstance(el.get("tag"), str)
@@ -4280,8 +4286,11 @@ def saved_contrast(d):
         raise SessionError(f"{d / 'pictures.json'} isn't what contrast --save writes")
 
     def png(name, size=None):
-        r = subprocess.run([*x.CONVERT, f"png:{d / name}", "-depth", "8", "ppm:-"],
-                           capture_output=True)
+        try:
+            r = subprocess.run([*x.CONVERT, f"png:{d / name}", "-depth", "8", "ppm:-"],
+                               capture_output=True)
+        except OSError as e:
+            raise SessionError(f"can't run {x.CONVERT[0]}: {e.strerror}") from None
         try:
             p = picture.Picture(*x.ppm(r.stdout)) if not r.returncode else None
         except ValueError:
@@ -4306,7 +4315,8 @@ def saved_contrast(d):
         if n.depth == 0:
             got["_toolkit"] = n.get("toolkit", "")
         runs = [Node(got, _run=r["run"], _look=r["look"], bounds=r.get("bounds"),
-                     **{"_" + k: r[k] for k in ("dom", "text") if k in r})
+                     **{"_" + k: r[k] for k in ("dom", "text") if k in r},
+                     **({"_color": tuple(bytes.fromhex(r["color"][1:]))} if "color" in r else {}))
                 for r in n.get("runs", [])]
         got.update({"_" + k: n[k] for k in ("dom", "text") if k in n})
         if "runs" in n:
@@ -4481,6 +4491,10 @@ def read(argv):
                 return 2
             passes = passes if a.passes else []
         else:
+            # Not over another run: one part of each would be read as one.
+            if a.save and Path(a.save).is_dir() and any(Path(a.save).iterdir()):
+                sys.stderr.write(f"shotbox: {a.save} isn't empty: --save writes a new directory\n")
+                return 2
             kept = {} if a.save else None
             problems, passes, notes, behind, whys, count = contrast(
                 a.window, a.text, a.graphics, a.edges, a.timeout, a.ignore, a.large, a.strict,
@@ -4491,7 +4505,8 @@ def read(argv):
                 Atspi = atspi()
                 for n, _ in problems + passes + notes + behind:
                     dom(Atspi, n)
-                save_contrast(a.save, kept)
+                unchecked = bool(CUT or QUIET and (not a.window or quiet_owns(a.window)))
+                save_contrast(a.save, kept, unchecked)
             passes = passes if a.passes else []
         # Said apart from the lines, on stderr, so stdout is PATH: WHAT.
         # Under --strict what wasn't measured is among the problems, but
@@ -4523,7 +4538,8 @@ def read(argv):
         else:
             for n, what in problems + passes + notes + behind:
                 print(f"{color.paint(sys.stdout, n.path, 'dim')}: {what}{placed(n)}")
-        if CUT or QUIET and (not a.window or quiet_owns(a.window)):
+        if (unchecked if a.what == "contrast" and a.save else
+                CUT or QUIET and (not a.window or quiet_owns(a.window))):
             sys.stderr.write((color.paint(sys.stderr, said, "warn") + "\n") * bool(said and not a.json)
                              + f"shotbox: not all checked: {unanswered()}\n")
             return 2

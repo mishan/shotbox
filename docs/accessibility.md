@@ -870,7 +870,9 @@ bus or PyGObject (ImageMagick reads the pictures): the same lines, JSON and exit
 options alike (`--passes`, `--ignore`, `--strict`, the ratios), 2 for a
 program the live run said didn't answer. That's for a test that holds a
 page or window to its contrast without running it each time, or a
-failure kept to look at again. `--from` takes no `--window` or `--save`.
+failure kept to look at again. DIR is made if it isn't there, and
+refused if it isn't empty, so one run's files can't be read with
+another's. `--from` takes no `--window` or `--save`.
 
 DIR holds `tree.json`, the tree as `a11y tree --json` has it ([Reading
 the tree](#reading-the-tree)), with what contrast read live of each

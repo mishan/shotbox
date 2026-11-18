@@ -629,6 +629,7 @@ test('Firefox on an --a11y session: contrast by the runs of a node\'s own text',
                                { encoding: 'utf8', env: { PATH: process.env.PATH } });
 
         assert.equal(from.stdout, got.stdout, from.stderr);
+        assert.equal(from.status, 0, from.stderr);
     }
     finally
     {
