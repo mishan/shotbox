@@ -4270,34 +4270,25 @@ def saved_contrast(d):
     except ValueError:
         m = None
 
-    # Not ImageMagick's prefixes ("xc:") or a part of a picture ("[1x1]").
-    def file(f):
-        return isinstance(f, str) and re.fullmatch(r"[\w.-]+\.png", f) and f != ".png"
-
     def ints(o, *keys):
         return all(type(o.get(k)) is int and o[k] >= 0 for k in keys)
-    if not (isinstance(m, dict) and m.get("version") == 1 and file(m.get("screen"))
+    if not (isinstance(m, dict) and m.get("version") == 1 and x.kept_name(m.get("screen"))
             and isinstance(m.get("samples"), list) and isinstance(m.get("hovers"), list)
-            and all(isinstance(s, dict) and file(s.get("file")) and ints(s, "x", "y")
+            and all(isinstance(s, dict) and x.kept_name(s.get("file")) and ints(s, "x", "y")
                     for s in m["samples"])
-            and all(isinstance(h, dict) and file(h.get("file")) and isinstance(h.get("box"), list)
+            and all(isinstance(h, dict) and x.kept_name(h.get("file")) and isinstance(h.get("box"), list)
                     and len(h["box"]) == 4 and all(type(v) is int for v in h["box"])
                     for h in m["hovers"])):
         raise SessionError(f"{d / 'pictures.json'} isn't what contrast --save writes")
 
     def png(name, size=None):
         try:
-            r = subprocess.run([*x.CONVERT, f"png:{d / name}", "-depth", "8", "ppm:-"],
-                               capture_output=True)
+            got = x.kept_png(d / name, size)
         except OSError as e:
-            raise SessionError(f"can't run {x.CONVERT[0]}: {e.strerror}") from None
-        try:
-            p = picture.Picture(*x.ppm(r.stdout)) if not r.returncode else None
-        except ValueError:
-            p = None
-        if not p or size and (p.width, p.height) != size:
+            raise SessionError(f"can't run ImageMagick: {e.strerror}") from None
+        if not got:
             raise SessionError(f"{d / name} isn't a picture contrast --save wrote")
-        return p
+        return picture.Picture(*got)
     QUIET.update(n.pid for n in tree if n.get("quiet"))
     walked = []
     for n in tree:

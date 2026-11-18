@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
-"""shotbox.flicker.watch() on frames made by hand, at exact times, from
-what each of flicker's rules says: no display. test/flicker_test.py."""
+"""shotbox.flicker.watch(), and flicker --from, on frames made by hand,
+at exact times, from what each of flicker's rules says: no display.
+test/flicker_test.py SHOTBOX."""
 
+import json
+import os
+import subprocess
 import sys
+import tempfile
+import zlib
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from shotbox import flicker  # noqa: E402
 from shotbox.flicker import watch  # noqa: E402
 
 fails = 0
@@ -119,8 +126,18 @@ dup.insert(2, (0.045, dup[1][1]))
 _, taken, changed = watch(dup, (W, H), 1.0)
 check((taken, changed) == (5, 4), f"a frame the same as the one before: taken, not kept ({taken}, {changed})")
 
+# The last picture can be taken a little past the watch's end, as one
+# started before it ends after it; no other.
+late = flips([0.03] * 4)
+late.append((2.01, strip(BLACK)))
+check(watch(late, (W, H), 2.0)[2] == 5, "the last frame a little past the end: taken")
+
 for case, frames in [
     ("no frames", []),
+    ("a frame past the end, then another", [(2.01, strip(BLACK)), (2.02, strip(GREEN))]),
+    ("a time not after the one before, which was dropped",
+     [(0.0, strip(BLACK)), (1.0, strip(BLACK)), (0.5, strip(GREEN))]),
+    ("pixels that aren't bytes", [(0.0, "x" * (W * H * 3))]),
     ("a time below 0", [(-0.1, strip(BLACK))]),
     ("a time not after the one before", [(0.1, strip(BLACK)), (0.1, strip(GREEN))]),
     ("a time that isn't a number", [("0", strip(BLACK))]),
@@ -133,5 +150,115 @@ for case, frames in [
         check(False, f"watch(): {case}: no error")
     except ValueError as e:
         check(True, f"watch(): {case}: {e}")
+for case, size, kw in [
+    ("a size of none", (0, 5), {}), ("a size that isn't whole", (W + 0.5, H), {}),
+    ("no seconds", (W, H), {"seconds": 0}), ("a tile of none", (W, H), {"tile": 0}),
+    ("a box to ignore as written", (W, H), {"ignore": ["16x16+16+0"]}),
+]:
+    try:
+        watch(flips([0.03] * 2), size, **{"seconds": 1.0, **kw})
+        check(False, f"watch(): {case}: no error")
+    except ValueError as e:
+        check(True, f"watch(): {case}: {e}")
+
+# flicker --from a directory written by hand: what --frames keeps.
+sb = sys.argv[1]
+tmp = Path(tempfile.mkdtemp())
+CONVERT = ["magick"] if subprocess.run(["sh", "-c", "command -v magick"],
+                                       capture_output=True).returncode == 0 else ["convert"]
+
+
+def kept(frames, seconds=2.0, taken=None, manifest=None, size=(W, H)):
+    """A directory holding `frames`, (at, rgb), and a frames.json saying
+    them, or `manifest` in its place."""
+    d = Path(tempfile.mkdtemp(dir=tmp))
+    for n, (_, rgb) in enumerate(frames, 1):
+        subprocess.run([*CONVERT, "-size", f"{size[0]}x{size[1]}", "-depth", "8", "rgb:-",
+                        str(d / f"f{n}.png")], input=rgb, check=True)
+    (d / "frames.json").write_text(manifest if manifest is not None else json.dumps(
+        {"version": 1, "seconds": seconds, "taken": len(frames) if taken is None else taken,
+         "size": list(size), "frames": [{"file": f"f{n}.png", "at": at}
+                                        for n, (at, _) in enumerate(frames, 1)]}))
+    return d
+
+
+def cli(d, *args):
+    r = subprocess.run([sb, "flicker", "--from", str(d), *args], capture_output=True, text=True,
+                       env={"PATH": os.environ["PATH"]})
+    return r.returncode, r.stdout.splitlines(), r.stderr
+
+
+STRIP = flips([0.03] * 60)
+# As --frames keeps it: its own PNGs and manifest.
+d = Path(tempfile.mkdtemp(dir=tmp))
+flicker.keep(d, [(at, zlib.compress(rgb)) for at, rgb in STRIP], (W, H), 2.0, 600)
+st, out, err = cli(d)
+check((st, out) == (1, ["flicker: 16x16+16+0, 59 changes, every 30 ms, #000000 and #009900, "
+                        "from 0.030s", "watched 2 s, 600 pictures, 300 a second, 60 changed"]),
+      f"flicker --from: a watch as --frames keeps it ({st}, {out}, {err!r})")
+st, out, err = cli(kept(STRIP, taken=600))
+check((st, out, err) == (1, ["flicker: 16x16+16+0, 59 changes, every 30 ms, #000000 and #009900, "
+                              "from 0.030s", "watched 2 s, 600 pictures, 300 a second, 60 changed"],
+                         ""), f"flicker --from: a kept strip flickering ({st}, {out}, {err!r})")
+st, out, err = cli(kept(flips([0.5] * 4), taken=4))
+check(st == 0 and out == ["watched 2 s, 4 pictures, 2 a second, 4 changed"]
+      and "fewer than two to 100 ms" in err and "too few to hold 8 changes" in err,
+      f"flicker --from: too few pictures, said ({st}, {out}, {err!r})")
+d = kept(STRIP, taken=600)
+st, out, err = cli(d, "--save", str(tmp / "sheets"))
+check(st == 1 and out[0].endswith(f"shown in {tmp / 'sheets'}/1-flicker-16x16+16+0.png")
+      and (tmp / "sheets" / "1-flicker-16x16+16+0.png").exists(),
+      f"flicker --from --save: its sheet, with no session ({st}, {out}, {err!r})")
+st, out, err = cli(d, "--ignore", "16x16+16+0")
+check(st == 0, f"flicker --from --ignore: the strip left out ({st}, {out})")
+
+GOOD = {"version": 1, "seconds": 2.0, "taken": 2, "size": [W, H],
+        "frames": [{"file": "f1.png", "at": 0.0}, {"file": "f2.png", "at": 0.03}]}
+TWO = flips([0.03] * 2)
+for case, kw, said in [
+    ("no frames.json", {"manifest": None}, "can't read"),
+    ("not JSON", {"manifest": "{"}, "isn't what flicker --frames writes"),
+    ("another version", {"manifest": json.dumps(dict(GOOD, version=2))}, "isn't what"),
+    ("seconds not finite", {"manifest": json.dumps(GOOD).replace("2.0", "Infinity", 1)}, "isn't what"),
+    ("a size that isn't one", {"manifest": json.dumps(dict(GOOD, size=[W, 0]))}, "isn't what"),
+    ("fewer taken than frames", {"manifest": json.dumps(dict(GOOD, taken=1))}, "isn't what"),
+    ("no frames", {"manifest": json.dumps(dict(GOOD, frames=[]))}, "isn't what"),
+    ("a time that's a bool", {"manifest": json.dumps(dict(GOOD, frames=[
+        {"file": "f1.png", "at": True}]))}, "isn't what"),
+    ("a picture named as ImageMagick's own", {"manifest": json.dumps(dict(GOOD, frames=[
+        {"file": "xc:red", "at": 0.0}]))}, "isn't what"),
+    ("a picture that isn't there", {"manifest": json.dumps(dict(GOOD, frames=[
+        {"file": "none.png", "at": 0.0}]))}, "isn't a 64x32 picture"),
+    ("a picture of another size", {"manifest": json.dumps(dict(GOOD, size=[W, H + 1]))},
+     "isn't a 64x33 picture"),
+    ("times not in order", {"manifest": json.dumps(dict(GOOD, frames=GOOD["frames"][::-1]))},
+     "after the one before"),
+]:
+    d = kept(TWO, **kw) if kw["manifest"] is not None else kept(TWO)
+    if kw["manifest"] is None:
+        (d / "frames.json").unlink()
+    st, out, err = cli(d)
+    check(st == 2 and not out and said in err and "Traceback" not in err,
+          f"flicker --from: {case}, said ({st}, {err!r})")
+
+# --save inside --frames is refused before either is touched past being
+# made, so --frames stays empty to try again.
+d = Path(tempfile.mkdtemp(dir=tmp))
+try:
+    flicker.ready([], save=d / "sheets", frames=d)
+    check(False, "--save in --frames: no error")
+except ValueError as e:
+    check(not any(d.iterdir()) and "isn't --frames'" in str(e),
+          f"--save in --frames: refused, --frames left empty ({e}, {list(d.iterdir())})")
+r = subprocess.run([sb, "flicker", "--from", ""], capture_output=True, text=True,
+                   env={"PATH": os.environ["PATH"]})
+check(r.returncode == 2 and "can't read" in r.stderr and "session" not in r.stderr,
+      f"flicker --from '': read, not a live watch ({r.stderr!r})")
+st, out, err = cli(kept(TWO), "--ignore", "big")
+check(st == 2 and "what to ignore is WIDTHxHEIGHT+X+Y" in err, f"flicker --from: a bad --ignore ({err!r})")
+for flag in (["--window", "w"], ["--crop", "1x1+0+0"], ["--seconds", "1"], ["--frames", str(tmp / "f")]):
+    st, out, err = cli(kept(TWO), *flag)
+    check(st == 2 and "takes no --window, --crop, --seconds or --frames" in err,
+          f"flicker --from: no {flag[0]} ({err!r})")
 
 sys.exit(bool(fails))

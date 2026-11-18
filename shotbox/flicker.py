@@ -38,6 +38,7 @@ import functools
 import math
 import json
 import operator
+import re
 import subprocess
 import tempfile
 import zlib
@@ -365,30 +366,48 @@ def watch(frames, size, seconds, taken=None, tile=16, brief=0.1, times=8, fuzz=6
     directory, each one's pictures there as a sheet (see `_sheet`), its
     path its "sheet", or "unsaved" if it couldn't be written. With
     `compressed`, each rgb is zlib's, and frames are taken as they are.
-    ValueError for frames that aren't: none, a time below 0 or not after
-    the one before, the wrong number of bytes."""
-    width, height = size
+    ValueError for what isn't one: a size, seconds, tile or box to ignore
+    that isn't; no frames; a time below 0, not after the one before, or
+    past the watch's end but for the last's (taken as the watch ended); a
+    frame of the wrong number of bytes."""
+    def number(v):
+        return type(v) in (int, float) and math.isfinite(v)
+    if not (len(size) == 2 and all(type(v) is int and v >= 1 for v in size)):
+        raise ValueError(f"a size is (width, height), each 1 or more, not {size!r}")
+    if not (number(seconds) and seconds > 0) or not (type(tile) is int and tile >= 1):
+        raise ValueError(f"seconds is more than 0 and tile 1 or more, not {seconds!r}, {tile!r}")
     skip = list(ignore)
+    if not all(isinstance(b, tuple) and len(b) == 4 and all(type(v) is int for v in b)
+               for b in skip):
+        raise ValueError(f"boxes to ignore are (width, height, x, y), not {skip!r}")
+    width, height = size
     if compressed:
         shots = list(frames)
         given = len(shots)
     else:
-        shots, last, given = [], None, 0
+        shots, last, given, before = [], None, 0, None
         for at, data in frames:
             given += 1
-            if not (isinstance(at, (int, float)) and not isinstance(at, bool)
-                    and math.isfinite(at) and at >= 0 and (not shots or at > shots[-1][0])):
+            if not (number(at) and at >= 0 and (before is None or at > before)
+                    and (before is None or before <= seconds)):
                 raise ValueError(f"frame {given}: its time, {at!r}, isn't a number 0 or more, "
-                                 "after the one before")
-            if len(data) != width * height * 3:
-                raise ValueError(f"frame {given}: {len(data)} bytes, not {width * height * 3}, "
-                                 f"for {width}x{height}")
+                                 "after the one before, all but the last within the watch")
+            before = at
+            try:
+                if len(data) != width * height * 3:
+                    raise ValueError(f"frame {given}: {len(data)} bytes, not "
+                                     f"{width * height * 3}, for {width}x{height}")
+                data = bytes(data)
+            except TypeError:
+                raise ValueError(f"frame {given}: its pixels aren't bytes") from None
             if data != last:
                 shots.append((at, zlib.compress(data, 1)))
                 last = data
     if not shots:
         raise ValueError("no frames")
     taken = given if taken is None else taken
+    if save is not None:
+        Path(save).mkdir(parents=True, exist_ok=True)
     times_ = [t for t, _ in shots]
     across = -(-width // tile)
     looks, before = [], None
@@ -654,7 +673,7 @@ def _sheet(out, shots, ks, end, size, box, margin):
             else ["-resize", f"{int(cw * scale)}x{int(ch * scale)}!"])
     left, top = int((bx - x0) * scale) - 1, int((by - y0) * scale) - 1
     right, bottom = int((bx - x0 + bw) * scale), int((by - y0 + bh) * scale)
-    with tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory(dir=Path(out).parent) as tmp:
         cells = []
         for n, k in enumerate(ks):
             t, data = shots[k]
@@ -702,3 +721,68 @@ def keep(out, shots, size, seconds, taken):
     (out / "frames.json").write_text(json.dumps({"version": 1, "seconds": seconds,
                                                  "taken": taken, "size": list(size),
                                                  "frames": names}))
+
+
+def ready(ignore, save=None, frames=None):
+    """The boxes `ignore` says, (width, height, x, y), with `save`'s and
+    `frames`' directories made and written to, before a watch: ValueError,
+    saying why, for any that can't be."""
+    skip = []
+    for g in ignore:
+        m = re.fullmatch(r"(\d+)x(\d+)\+(\d+)\+(\d+)", g)
+        if not m:
+            raise ValueError(f"what to ignore is WIDTHxHEIGHT+X+Y, not {g}")
+        skip.append(tuple(int(n) for n in m.groups()))
+    for kept_in, d in ((True, frames), (False, save)):
+        if d is None:
+            continue
+        if not str(d):
+            raise ValueError("a directory to save to, not ''")
+        try:
+            Path(d).mkdir(parents=True, exist_ok=True)
+            tempfile.TemporaryFile(dir=d).close()
+        except (FileExistsError, NotADirectoryError):
+            raise ValueError(f"can't save to {d}: it, or a directory it's in, is a file") from None
+        except OSError as e:
+            raise ValueError(f"can't save to {d}: {e.strerror}") from None
+        # Not over another watch: one part of each would be read as one.
+        if kept_in and any(Path(frames).iterdir()):
+            raise ValueError(f"{frames} isn't empty: --frames keeps a watch in a new directory")
+        if kept_in and save is not None and (
+                Path(frames).resolve() in (Path(save).resolve(), *Path(save).resolve().parents)):
+            raise ValueError("--save's directory isn't --frames' or in it")
+    return skip
+
+
+def kept(d):
+    """The watch `keep` kept in the directory `d`: (its frames, read a
+    PNG at a time as they're asked for, its size, seconds, and how many
+    pictures were taken). ValueError, saying why, for what isn't one,
+    there or as its frames are read; OSError if ImageMagick can't run."""
+    d = Path(d)
+    try:
+        m = json.loads((d / "frames.json").read_text())
+    except OSError as e:
+        raise ValueError(f"can't read {d / 'frames.json'}: {e.strerror}") from None
+    except ValueError:
+        m = None
+
+    def number(v):
+        return type(v) in (int, float) and math.isfinite(v)
+    if not (isinstance(m, dict) and m.get("version") == 1 and number(m.get("seconds"))
+            and m["seconds"] > 0 and isinstance(m.get("size"), list) and len(m["size"]) == 2
+            and all(type(v) is int and v >= 1 for v in m["size"])
+            and isinstance(m.get("frames"), list) and m["frames"]
+            and type(m.get("taken")) is int and m["taken"] >= len(m["frames"])
+            and all(isinstance(f, dict) and x.kept_name(f.get("file")) and number(f.get("at"))
+                    for f in m["frames"])):
+        raise ValueError(f"{d / 'frames.json'} isn't what flicker --frames writes")
+
+    def frames():
+        for f in m["frames"]:
+            got = x.kept_png(d / f["file"], m["size"])
+            if not got:
+                raise ValueError(f"{d / f['file']} isn't a {m['size'][0]}x{m['size'][1]} "
+                                 "picture flicker --frames wrote")
+            yield f["at"], got[2]
+    return frames(), tuple(m["size"]), m["seconds"], m["taken"]

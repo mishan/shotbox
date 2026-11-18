@@ -570,30 +570,10 @@ class Screen:
             if not (m and int(m[1]) and int(m[2])):
                 self.fail(f"a crop is WIDTHxHEIGHT+X+Y, at least 1x1, not {crop}")
             area = tuple(int(n) for n in m.groups())
-        skip = []
-        for g in ignore:
-            m = re.fullmatch(geometry, g)
-            if not m:
-                self.fail(f"what to ignore is WIDTHxHEIGHT+X+Y, not {g}")
-            skip.append(tuple(int(n) for n in m.groups()))
-        for d in (save, frames):
-            if d is None:
-                continue
-            if not str(d):
-                self.fail("a directory to save to, not ''")
-            try:
-                Path(d).mkdir(parents=True, exist_ok=True)
-                tempfile.TemporaryFile(dir=d).close()
-            except (FileExistsError, NotADirectoryError):
-                self.fail(f"can't save to {d}: it, or a directory it's in, is a file")
-            except OSError as e:
-                self.fail(f"can't save to {d}: {e.strerror}")
-        if frames is not None:
-            # Not over another watch: one part of each would be read as one.
-            if any(Path(frames).iterdir()):
-                self.fail(f"{frames} isn't empty: --frames keeps a watch in a new directory")
-            if save is not None and Path(save).resolve() == Path(frames).resolve():
-                self.fail("--frames and --save are two directories")
+        try:
+            skip = flicker.ready(ignore, save, frames)
+        except ValueError as e:
+            self.fail(str(e))
         fd, png = tempfile.mkstemp(".png", dir=self.env["SHOTBOX_SCRATCH"])
         os.close(fd)
 
@@ -625,7 +605,8 @@ class Screen:
                 got = picture()
                 taken += 1
                 if shots and got[:2] != size:
-                    self.fail("the window changed size as it was watched")
+                    self.fail(f"the {'window' if w else 'display'} changed size as it was "
+                              "watched")
                 size = got[:2]
                 if got[2] != last:
                     shots.append(((t0 + time.monotonic()) / 2 - start, zlib.compress(got[2], 1)))
