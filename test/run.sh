@@ -1551,6 +1551,43 @@ assert p['version'] == 1 and len(p['samples']) == 5, p
 assert all(os.path.exists(d + '/' + f['file']) for f in [{'file': p['screen']}] + p['samples']), p" \
     "$tmp/saved" && ok "a11y: contrast --save keeps what it read of each node, and its pictures" \
     || { fail "a11y: contrast --save"; cat "$tmp/contrast2"; ls -l "$tmp/saved"; }
+  # --from what --save wrote says what the live run said, with no session:
+  # GTK 3, with --edges, and another program that doesn't answer; text
+  # blinking, and moving; a GTK 4 window behind a modal. GTK 4's own are
+  # notes.
+  cat > "$tmp/replay.sh" <<'EOF'
+sb=$1 here=$2 d=$3 win=$4; shift 4
+"$sb" wait window "$win" >/dev/null
+[ "$win" != g3 ] || { "$here/gtk4_window.py" & app=$!; "$sb" wait node Save >/dev/null; kill -STOP $app; }
+# All windows for GTK 3's, so the one that doesn't answer counts.
+w=$win; [ -z "${app-}" ] || w=
+"$sb" a11y contrast "$@" --timeout 2 ${w:+--window "$w"} --save "$d" > "$d.out" 2> "$d.err"
+echo $? > "$d.st"
+[ -z "${app-}" ] || { kill -CONT $app; kill $app; }
+EOF
+  i=0
+  for c in "$here/window.py g3 contrast;g3;--edges 3 --passes" \
+           "$here/window.py blink blinking;blink;--strict --passes" \
+           "$here/window.py mv moving;mv;--json --passes" "$app faint modal;a11y-test;--json"; do
+    cmd=${c%%;*} rest=${c#*;}; win=${rest%%;*} args=${rest#*;} i=$((i + 1)) d=$tmp/replay$i
+    "$sb" run --a11y -- sh -c "$cmd & sh '$tmp/replay.sh' '$sb' '$here' '$d' '$win' $args" \
+      >/dev/null 2>&1 || true
+    set +e
+    env -u DISPLAY -u WAYLAND_DISPLAY "$sb" a11y contrast $args --from "$d" > "$d.from" 2> "$d.ferr"
+    st=$?; set -e
+    [ -s "$d.out" ] && [ "$st" = "$(cat "$d.st")" ] && cmp -s "$d.out" "$d.from" && cmp -s "$d.err" "$d.ferr" \
+      && { [ "$win" != g3 ] || grep -q "not all checked: program" "$d.ferr"; } \
+      && ok "a11y: contrast --from says what the live run that saved it did ($win)" \
+      || { fail "a11y: contrast --from, against live ($win: $st, $(cat "$d.st" 2>/dev/null))"
+           { diff "$d.out" "$d.from"; diff "$d.err" "$d.ferr"; } || true; }
+  done
+  "$sb" run --a11y -- sh -c "'$app' faint & '$sb' wait window a11y-test >/dev/null
+    '$sb' a11y contrast --window a11y-test --save '$tmp/replay4k'" >/dev/null 2>&1 || true
+  set +e; "$sb" a11y contrast --from "$tmp/replay4k" > "$tmp/replay4k.from" 2>&1; st=$?; set -e
+  [ $st = 2 ] && grep -q 'label\[7\]: text not measured from a file: GTK 4 is measured live only$' "$tmp/replay4k.from" \
+    && ! grep -v 'not measured from a file: GTK 4 is measured live only$\|^shotbox: nothing measured' "$tmp/replay4k.from" \
+    && ok "a11y: contrast --from: GTK 4's, each a note" \
+    || { fail "a11y: contrast --from, GTK 4 ($st)"; cat "$tmp/replay4k.from"; }
   # A faint label dark half a second in two is changing, whenever the
   # first picture's taken, and with --strict fails; dark words sliding by
   # pass, though they've moved out of where they were first seen.

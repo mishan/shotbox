@@ -27,6 +27,8 @@
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 import { chromium } from 'playwright';
 
@@ -34,6 +36,26 @@ import { accessible } from '../node/a11y.mjs';
 
 const shotbox = process.argv[2];
 const run = (...args) => execFileSync(shotbox, args, { encoding: 'utf8' });
+
+/* contrast ARGS (its --window last) live, saved, and from what it saved,
+   with no session: each as (status, out, err), and whether anything saved
+   but a picture has the words typed in a field. */
+const replays = {};
+const replay = (key, ...args) =>
+{
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'shotbox-replay-'));
+    const said = (got) => ({ status: got.status, out: got.stdout, err: got.stderr });
+    const live = said(spawnSync(shotbox, ['a11y', 'contrast', ...args, '--save', dir],
+                                { encoding: 'utf8' }));
+
+    replays[key] = {
+        live,
+        from: said(spawnSync(shotbox, ['a11y', 'contrast', ...args.slice(0, -2), '--from', dir],
+                             { encoding: 'utf8', env: { PATH: process.env.PATH } })),
+        typed: fs.readdirSync(dir).filter((f) => f.endsWith('.json'))
+            .some((f) => fs.readFileSync(path.join(dir, f), 'utf8').includes('Typed words')),
+    };
+};
 
 const browser = await chromium.launch({ ...accessible });
 
@@ -96,6 +118,7 @@ try
                                { encoding: 'utf8' }).stdout;
     const ignored = spawnSync(shotbox, ['a11y', 'contrast', '--ignore', 'div#intro',
                                         '--window', 'a11y-browser.*'], { encoding: 'utf8' });
+    replay('faint', '--passes', '--window', 'a11y-browser.*');
 
     /* Behind an aria-modal dialog, on its dimmed backdrop: said apart;
        not behind one translated off the screen, or of no size. */
@@ -125,6 +148,7 @@ try
 
         behind[title] = JSON.parse(spawnSync(shotbox, ['a11y', 'contrast', '--json', '--window',
                                                        `${title}.*`], { encoding: 'utf8' }).stdout);
+        replay(title, '--json', '--window', `${title}.*`);
         await modal.close();
     }
 
@@ -153,6 +177,7 @@ try
     }
     const field = spawnSync(shotbox, ['a11y', 'contrast', '--window', 'a11y-typed.*'],
                             { encoding: 'utf8' });
+    replay('typed', '--json', '--passes', '--window', 'a11y-typed.*');
     const typedLint = spawnSync(shotbox, ['a11y', 'lint', '--window', 'a11y-typed.*'],
                                 { encoding: 'utf8' });
     const typedTree = run('a11y', 'tree', '--json', '--window', 'a11y-typed.*');
@@ -194,6 +219,7 @@ try
         fading[title] = Array.from({ length: title === 'a11y-fading' ? 10 : 1 }, () => JSON.parse(
             spawnSync(shotbox, ['a11y', 'contrast', '--json', '--passes', '--window',
                                 `${title}.*`], { encoding: 'utf8' }).stdout));
+        replay(title, '--json', '--passes', '--window', `${title}.*`);
         await moving.close();
     }
 
@@ -333,6 +359,7 @@ try
         hint,
         whole,
         crash: { status: all.status, out: all.stdout, err: all.stderr },
+        replays,
     }));
 }
 finally
