@@ -1049,6 +1049,19 @@ sizes = subprocess.run(['identify', '-format', '%w %h\n', *(d + '/' + x['file'] 
 assert set(sizes) == {'200 120'} and len(sizes) == len(f), sizes" "$tmp/watched" \
   && ok "flicker --frames keeps each picture that changed, and when; not over another watch" \
   || { fail "flicker --frames ($st, $again)"; cat "$tmp/watched.out" "$tmp/watched.err"; ls "$tmp/watched" | head || true; }
+# --from what --frames kept says what the live watch did, outside the
+# session: a square flickering, one flashing, and a still window.
+for c in "flip 30 1" "flash 40 1" "still - 0"; do
+  set -- $c; d=$tmp/kept-$1
+  set +e; "$sb" run -- sh -c "'$here/window.py' fl $1 $2 & '$sb' wait window fl >/dev/null &&
+    '$sb' flicker --window fl --seconds 1.6 --frames '$d'" > "$d.out" 2> "$d.err"; st=$?
+  env -u DISPLAY -u WAYLAND_DISPLAY "$sb" flicker --from "$d" > "$d.from" 2> "$d.ferr"; from=$?
+  set -e
+  [ $st = "$3" ] && [ $from = $st ] && cmp -s "$d.out" "$d.from" && cmp -s "$d.err" "$d.ferr" \
+    && ok "flicker --from says what the live watch that kept it did ($1)" \
+    || { fail "flicker --from, against live ($1: $st, $from)"
+         { diff "$d.out" "$d.from"; diff "$d.err" "$d.ferr"; } || true; }
+done
 
 # chords LOG [SESSION OPTIONS]: Shift in a chord, into cat in a terminal:
 # the symbol on the key's shifted level, as on a keyboard (A, !, +), and
