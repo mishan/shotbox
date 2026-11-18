@@ -1530,6 +1530,21 @@ assert (len(faint) == 1 and re.fullmatch('text behind a modal ' + want, faint[0]
       2>/dev/null | grep -q '/label\[0\]: text too small to measure' \
     && ok "a11y: contrast, GTK 3: not a switch, a framed text view, light text, large text, a dot, which passes alone" \
     || { fail "a11y: contrast, GTK 3 ($st)"; cat "$tmp/contrast"; }
+  # --save keeps what was read live of each node, and the pictures.
+  rm -rf "$tmp/saved"
+  "$sb" run --a11y -- sh -c "'$here/window.py' g3 contrast &
+    '$sb' a11y contrast --edges 3 --window g3 --save '$tmp/saved'" > "$tmp/contrast2" 2>&1 || true
+  python3 -c "import json, os, sys; d = sys.argv[1]
+t, p = json.load(open(d + '/tree.json')), json.load(open(d + '/pictures.json'))
+by = {n['path'].split('/', 1)[-1]: n for n in t}
+assert [n.get('switch') for n in t if n['role'] == 'toggle button'] == [True], t
+assert by['filler[0]/label[1]']['color'] == '#5f5670' and by['filler[0]/label[4]']['large'], t
+assert t[0]['depth'] == 0 and t[0]['toolkit'].startswith('gtk 3.') and t[0]['window'], t[0]
+assert not [k for n in t for k in n if k.startswith('_')], t
+assert p['version'] == 1 and len(p['samples']) == 5, p
+assert all(os.path.exists(d + '/' + f['file']) for f in [{'file': p['screen']}] + p['samples']), p" \
+    "$tmp/saved" && ok "a11y: contrast --save keeps what it read of each node, and its pictures" \
+    || { fail "a11y: contrast --save"; cat "$tmp/contrast2"; ls -l "$tmp/saved"; }
   # A faint label dark half a second in two is changing, whenever the
   # first picture's taken, and with --strict fails; dark words sliding by
   # pass, though they've moved out of where they were first seen.

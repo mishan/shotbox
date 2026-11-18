@@ -23,6 +23,7 @@ import math
 import os
 import re
 import statistics
+import subprocess
 import sys
 import threading
 import time
@@ -2158,7 +2159,7 @@ def for_contrast(Atspi, nodes):
 
 
 def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore=(),
-             large=3.0, strict=False):
+             large=3.0, strict=False, keep=None):
     """What's drawn with too little contrast, as (node, what), measured on a
     picture of the screen, `window` raised, in each node's bounds: text (a
     web node's own, run by run, runs()), and a button, link, tab
@@ -2179,7 +2180,8 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
     what), which doesn't fail even with `strict`: shut off till it's
     closed, and dimmed on purpose or covered by it; why GTK 4's weren't,
     a line each; how many were measured). A web page with text, none of it
-    measured, is a note."""
+    measured, is a note. With `keep`, a dict, what it measured is put in
+    it, for save_contrast()."""
     skip = ignored(ignore, web=True)
     Atspi = atspi()
     if window:
@@ -3373,11 +3375,13 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
     sampler.join()
     rs = set(regions.values())
     samples = [{r: crops_of(p, r, x0, y0) for r in rs} for p, x0, y0 in shots]
+    hovers = {}
     for i, box, at in unseen_controls:
         # A control can be drawn only when the pointer's over it: a tab's
         # close button. Say how it is then, to tell.
-        over = picture.text_contrast(picture.Picture(box[2], box[3], crops_of(
-            hovered(box), (box[0], box[1], box[0] + box[2], box[1] + box[3]))), [0, 0, *box[2:]])
+        hovers[tuple(box)] = picture.Picture(box[2], box[3], crops_of(
+            hovered(box), (box[0], box[1], box[0] + box[2], box[1] + box[3])))
+        over = picture.text_contrast(hovers[tuple(box)], [0, 0, *box[2:]])
         if over:
             problems[i] = (problems[i][0], problems[i][1] + (
                 f"; with the pointer over it, {ratio_text(over[0])}:1, "
@@ -3546,6 +3550,8 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
                 "something disabled, isn't; see docs/accessibility.md.")
             if why not in whys:
                 whys.append(why)
+    if keep is not None:
+        keep.update(nodes=nodes, first=first, shots=shots, hovers=hovers)
     notes = [(n, what) for n, what in notes if not skip(n, what)]
     # What's scrolled out of view isn't there to measure, as GTK 3's and
     # browsers' rows aren't, which aren't said at all.
@@ -3822,6 +3828,61 @@ def dom(Atspi, n):
             or "").replace("\ufffc", "").strip()
     n.update({**({"dom": el} if el else {}),
               **({"text": text[:40] + "…" * (len(text) > 40)} if text else {})})
+
+
+def save_contrast(out, kept):
+    """Write to the directory `out` what contrast(keep=) kept: tree.json,
+    the tree with what was read of each node live, each field only where
+    it isn't the default (but never what's typed in a field), and
+    pictures.json, which names the PNGs: the first picture of the screen,
+    each sample and where it's from, and each control not seen with the
+    pointer over it, only its box."""
+    out = Path(out)
+    try:
+        out.mkdir(parents=True, exist_ok=True)
+        nodes = kept["nodes"]
+
+        def png(name, p):
+            subprocess.run([*x.CONVERT, "ppm:-", *x.QUIET_PNG, str(out / name)], check=True,
+                           input=b"P6 %d %d 255\n" % (p.width, p.height) + p.data)
+            return name
+
+        def placed_at(n):
+            return {k: n[k] for k in ("dom", "text") if k in n}
+
+        tree = []
+        for n in nodes:
+            win = nodes[n._win]
+            got = {k: n[k] for k in ("role", "name", "description", "states", "path", "bounds")}
+            got["depth"] = n.path[len(win.path):].count("/")
+            if win is n:
+                pid = pid_of(n._top)
+                got.update(**({"pid": pid} if pid is not None else {}), toolkit=n._toolkit,
+                           window=n._window)
+            if not n._showing:
+                got["showing"] = False
+            if n.get("_drawn") is False:
+                got["drawn"] = False
+            for k in ("contents", "filled", "switch", "large", "moved"):
+                if n.get("_" + k):
+                    got[k] = n["_" + k]
+            if "_shut_by" in n:
+                got["shut_by"] = n._shut_by
+            if "_color" in n:
+                got["color"] = picture.hex_of(n._color)
+            if "_runs" in n:
+                got["runs"] = [{"run": r._run, "look": r._look, "bounds": r.bounds, **placed_at(r)}
+                               for r in n._runs]
+            tree.append({**got, **placed_at(n)})
+        (out / "tree.json").write_text(json.dumps(tree))
+        names = {"version": 1, "screen": png("picture.png", kept["first"]),
+                 "samples": [{"file": png(f"sample-{i}.png", p), "x": x0, "y": y0}
+                             for i, (p, x0, y0) in enumerate(kept["shots"], 1)],
+                 "hovers": [{"file": png(f"hover-{i}.png", p), "box": list(box)}
+                            for i, (box, p) in enumerate(kept["hovers"].items(), 1)]}
+        (out / "pictures.json").write_text(json.dumps(names))
+    except (OSError, subprocess.CalledProcessError) as e:
+        raise SessionError(f"can't save to {out}: {getattr(e, 'strerror', None) or e}") from None
 
 
 def placed(n, named=False):
@@ -4188,6 +4249,9 @@ def read(argv):
     ct.add_argument("--ignore", **ignore)
     ct.add_argument("--passes", action="store_true",
                     help="also what passes, with its ratio, after what fails")
+    ct.add_argument("--save", metavar="DIR",
+                    help="also write to DIR the tree and pictures it measured, for "
+                         "contrast --from DIR (the pictures can show what's typed in a field)")
     ct.add_argument("--strict", action="store_true",
                     help="what isn't measured fails too")
     for s in (t, df, lt, w, c, sc, ct, nd, gn, il):
@@ -4254,8 +4318,17 @@ def read(argv):
         elif a.what == "lint":
             problems = lint(for_lint(atspi(), tree(a.window, a.timeout, bounds=a.json)), a.ignore)
         else:
+            kept = {} if a.save else None
             problems, passes, notes, behind, whys, count = contrast(
-                a.window, a.text, a.graphics, a.edges, a.timeout, a.ignore, a.large, a.strict)
+                a.window, a.text, a.graphics, a.edges, a.timeout, a.ignore, a.large, a.strict,
+                kept)
+            if a.save:
+                # Where each node is in its page, for each that could be
+                # said, as --from says them with --passes or not.
+                Atspi = atspi()
+                for n, _ in problems + passes + notes + behind:
+                    dom(Atspi, n)
+                save_contrast(a.save, kept)
             passes = passes if a.passes else []
         # Said apart from the lines, on stderr, so stdout is PATH: WHAT.
         # Under --strict what wasn't measured is among the problems, but
