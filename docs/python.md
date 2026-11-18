@@ -121,6 +121,20 @@ with shotbox.Session(size=(1600, 1000), failed="out/chat-failed.png") as s:
 `shotbox.mutate(cmd, targets, ...)` runs `shotbox mutate` and returns
 its report: [Mutation testing](mutate.md#verdicts).
 
+`shotbox.flicker.watch(frames, size, seconds, taken=None, tile=16,
+brief=0.1, times=8, fuzz=6.0, ignore=(), save=None)` is `shotbox flicker` on frames
+you give it, with no session: `frames`, in order, each `(at, rgb)`, its
+time in seconds from the watch's start and its pixels, `size`'s width
+times height times 3 bytes (a generator is read a frame at a time); a
+frame the same as the one before is dropped, as a picture that didn't
+change. `ignore` takes boxes as `(width, height, x, y)`, and `save` a
+directory for `--save`'s sheets. It returns
+`(found, taken, changed)`, as `Screen.flicker()` does: each found a dict,
+its `kind` (`flicker` or `flash`), `box`, `at`, `changes`, `every` and
+`looks`; how many pictures were taken (`taken`, by default how many
+frames); and how many were kept. Frames it can't read raise
+`ValueError`. [flicker](commands.md#flicker) has what each rule finds.
+
 Installed, `import shotbox` just works. With a checkout, put its root on
 `PYTHONPATH` (`--pass PYTHONPATH` to let it
 into a session).
