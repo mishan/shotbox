@@ -2037,7 +2037,7 @@ def ancestors(n):
     return out
 
 
-def modals(Atspi, nodes):
+def modals(nodes):
     """Each of `nodes` behind a modal dialog, by its path, and that dialog,
     a Node. A modal window shuts off every other window of its program,
     covered or not (GTK's don't say which is their parent); a modal dialog
@@ -2049,7 +2049,7 @@ def modals(Atspi, nodes):
     it, drawn under it, is behind. An alert anywhere else (an error
     label, a toast, a status page) isn't one, nor is a box or popover
     given a dialog's role. Of dialogs over dialogs, the last, outermost,
-    is in front."""
+    is in front. It reads only the nodes, as for_contrast() leaves them."""
     def inside(path, outer):
         return path == outer or path.startswith(outer + "/")
 
@@ -2091,7 +2091,8 @@ def modals(Atspi, nodes):
         if (nodes[n._win] is n or n.role not in dialogs or not n._showing or not n.bounds
                 or not all(n.bounds[2:])):
             continue
-        under = "modal" not in n.states and gtk4(n) and layered(n)
+        under = ("modal" not in n.states and nodes[n._win].get("_toolkit", "").startswith("GTK 4.")
+                 and layered(n))
         if "modal" not in n.states and not under:
             continue
         scope = next((o.path for o in reversed(nodes[:i]) if o.role == "document web"
@@ -2105,25 +2106,55 @@ def modals(Atspi, nodes):
     behind = {n.path: m for i, n in enumerate(nodes) for scope, (m, last) in fronts.items()
               if i < last and inside(n.path, scope) and not inside(n.path, m.path)
               and not inside(m.path, n.path)}
-    apps = {}
-    for n in nodes:
-        if n._top.app:
-            apps.setdefault(n._top.app.bus_name, n._top.get_application())
-    for bus, app in apps.items():
-        front = None
-        try:
-            for t in (app.get_child_at_index(j) for j in range(max(app.get_child_count(), 0))):
-                states = t and t.get_state_set()
-                if states and states.contains(Atspi.StateType.MODAL) and states.contains(
-                        Atspi.StateType.SHOWING):
-                    role = t.get_role()
-                    front = node(Atspi, t, states, role,
-                                 f"{role_name(Atspi, t, role)} {json.dumps(t.get_name() or '')}")
-        except Exception:   # gone while we looked: a window closing
-            continue
-        behind.update({n.path: front for n in nodes if front and n._top.app
-                       and n._top.app.bus_name == bus and nodes[n._win]._id != front._id})
+    behind.update({n.path: Node(name=nodes[n._win]._shut_by) for n in nodes
+                   if "_shut_by" in nodes[n._win]})
     return behind
+
+
+def modal_window(Atspi, app):
+    """The last of `app`'s windows that's modal and showing, a Node, or None."""
+    front = None
+    try:
+        for t in (app.get_child_at_index(j) for j in range(max(app.get_child_count(), 0))):
+            states = t and t.get_state_set()
+            if states and states.contains(Atspi.StateType.MODAL) and states.contains(
+                    Atspi.StateType.SHOWING):
+                role = t.get_role()
+                front = node(Atspi, t, states, role,
+                             f"{role_name(Atspi, t, role)} {json.dumps(t.get_name() or '')}")
+    except Exception:   # gone while we looked: a window closing
+        return None
+    return front
+
+
+def for_contrast(Atspi, nodes):
+    """Note on each of `nodes` (windowed()), read live, what contrast reads
+    of it but the walk's: on a window's node, its program's toolkit, and
+    the name of a modal window of that program, which shuts it off
+    ("shut_by"), unless it's that one; "switch", on GTK 3's switch; and on
+    a page's node showing, its text ("contents"), or for a field only
+    whether anything's in it ("filled"): what's typed in one isn't kept."""
+    fronts = {}
+    for i, n in enumerate(nodes):
+        if n._win == i:
+            try:
+                n["_toolkit"] = made_with(n._top)
+            except Exception:   # gone
+                n["_toolkit"] = ""
+            bus = n._top.app and n._top.app.bus_name
+            if bus and bus not in fronts:
+                fronts[bus] = modal_window(Atspi, n._top.get_application())
+            if bus and fronts[bus] and n._id != fronts[bus]._id:
+                n["_shut_by"] = fronts[bus].name
+        if gtk3_switch(Atspi, n):
+            n["_switch"] = True
+        if n._showing and "/document web[" in n.path:
+            text = contents(Atspi, n) or ""
+            if "editable" not in n.states and text:
+                n["_contents"] = text
+            elif "editable" in n.states and text.replace("\ufffc", "").strip():
+                n["_filled"] = True
+    return nodes
 
 
 def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore=(),
@@ -2159,8 +2190,8 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
         screen.park()
     finally:
         screen.close()
-    nodes = windowed(walk(Atspi, window, timeout, bounds=True))
-    fronts = modals(Atspi, nodes)
+    nodes = for_contrast(Atspi, windowed(walk(Atspi, window, timeout, bounds=True)))
+    fronts = modals(nodes)
     texts, controls = role_names(TEXTS), role_names(CONTROLS)
     named = role_names(NAMED)
     images, textless, edged = role_names(IMAGES), role_names(TEXTLESS), role_names(EDGED)
@@ -2181,7 +2212,7 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
                 return True
         return "disabled" in n.states
 
-    kids, worded, kits = {}, {}, {}
+    kids, worded = {}, {}
     for n in nodes:
         kids.setdefault(n.path.rsplit("/", 1)[0], []).append(n)
 
@@ -2193,11 +2224,9 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
         whose text is its static children's, nor a control or image,
         measured as one."""
         if n.path not in worded:
-            if n._win not in kits:
-                kits[n._win] = toolkit(n)
             text = ("/document web[" in n.path and n.role not in unworded and (
-                n.role == "static" or kits[n._win] != "Chromium")
-                and contents(Atspi, n) or "").replace("\ufffc", "")
+                n.role == "static" or nodes[n._win]._toolkit.split(" ")[0] != "Chromium")
+                and n.get("_contents") or "").replace("\ufffc", "")
             worded[n.path] = any(c.isalnum() for c in text) and not any(
                 o.role == "static" and o.name.strip() and o.name.strip() in text
                 for o in kids.get(n.path, ()))
@@ -2221,7 +2250,7 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
         coordinates for text start elsewhere than for its nodes, so it's
         asked in the screen's, taken to the walk's bounds. Right to left
         text, which may be drawn in another order, is asked of whole."""
-        acc, text, out, i, boxes = n._acc, contents(Atspi, n) or "", [], 0, {}
+        acc, text, out, i, boxes = n._acc, n.get("_contents", ""), [], 0, {}
         try:
             e = acc.get_extents(Atspi.CoordType.SCREEN)
         except Exception:   # gone since the walk
@@ -2300,7 +2329,7 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
         if (not n._showing or not (n.name or wording(n)) or "editable" in n.states
                 or re.search(r"/document web\[\d+\]/(.*/)?canvas\[\d+\](/|$)", n.path)
                 or disabled(n)
-                or n.role in textless or gtk3_switch(Atspi, n)):
+                or n.role in textless or n.get("_switch")):
             return None
         if n.role in images:
             return "graphics"
@@ -2419,7 +2448,10 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
                 unplaced = [n for n in unplaced if not n.bounds]
         finally:
             s.close()
-    measured = [r for n in nodes if kind(n) for r in (runs(n) if wording(n) else [n])]
+    for n in nodes:
+        if kind(n) and wording(n):
+            n["_runs"] = runs(n)
+    measured = [r for n in nodes if kind(n) for r in n.get("_runs", [n])]
     problems, passes, notes, behind, whys, count, taken = [], [], [], [], [], 0, []
     uncounted = set()   # what's measured only by its pictures, if at all
     trusted = os.environ.get("SHOTBOX_TRUST_GTK4_BOUNDS") == "1"
@@ -3431,7 +3463,7 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
     if edges:
         kinds = [n for n in nodes if n._showing and (
             n.role in edged or (n.role == "text" and "editable" in n.states))
-            and not gtk3_switch(Atspi, n)]
+            and not n.get("_switch")]
         edging = [n for n in kinds if not disabled(n) and not covered(n, "edge")]
         late = [n for n in kinds if gtk4(n) and gtk4(n) not in GTK4_BOUNDS
                 and gtk4_release(n) >= (4, 14, 6) and not trusted and n.bounds]
@@ -3480,8 +3512,8 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
     for d in nodes:
         if (d.role == "document web" and d._showing
                 and not any(within(n.path, d.path) for n, _ in said)
-                and any(o._showing and (contents(Atspi, o) or "").replace("\ufffc", "").strip()
-                        for o in nodes if within(o.path, d.path))):
+                and any(o._showing and (o.get("_filled") or o.get("_contents", "").replace(
+                    "\ufffc", "").strip()) for o in nodes if within(o.path, d.path))):
             notes.append((d, "text not measured: none of the page's text was"))
             d["_why"] = why = (
                 "A web page has text, but none of it was measured: text in a field, or in "
