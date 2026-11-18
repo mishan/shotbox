@@ -807,6 +807,36 @@ def rgb(path):
     return w, h, data
 
 
+def kept_name(name):
+    """Whether `name` is one a run keeps a picture by in its directory: a
+    PNG's, not ImageMagick's prefixes ("xc:") or a part of one ("[1x1]")."""
+    return isinstance(name, str) and bool(re.fullmatch(r"[\w.-]+\.png", name)) and name != ".png"
+
+
+def kept_png(path, size=None):
+    """The PNG a run kept at `path`, as (width, height, RGB bytes), its size
+    asked first and held to `size`, so a small file can't say it's huge;
+    None if it isn't one. OSError if ImageMagick can't be run."""
+    path = f"png:{path}"
+    got = subprocess.run(["identify", "-ping", "-format", "%w %h", path], capture_output=True,
+                         text=True)
+    try:
+        w, h = map(int, got.stdout.split())
+    except ValueError:
+        return None
+    if got.returncode or size and (w, h) != tuple(size):
+        return None
+    # The size again from what's decoded, which the file can have changed
+    # under since it was asked.
+    data = subprocess.run([*CONVERT, path, "-alpha", "off", "-depth", "8", "+set", "comment", "ppm:-"],
+                          capture_output=True)
+    try:
+        got = ppm(data.stdout) if not data.returncode else None
+    except ValueError:
+        return None
+    return got if got and got[:2] == (w, h) and len(got[2]) == w * h * 3 else None
+
+
 def box_of(geometry):
     """A WIDTHxHEIGHT+X+Y box, at least 1x1, as (width, height, x, y); None
     if it isn't one."""

@@ -1063,17 +1063,18 @@ def cmd_latency(argv):
 
 
 def cmd_flicker(argv):
+    from . import flicker
     p = argparse.ArgumentParser(prog="shotbox flicker",
                                 description="Inside `shotbox run`: watch the screen, or a "
                                             "window, for a part that keeps switching between "
                                             "two looks (flicker), or flashes another look "
                                             "once and comes back; fail (1) if one does, "
                                             "or can't watch (2). Boxes are in what's "
-                                            "watched: the window, or the crop.")
+                                            "watched: the window, or the crop. With --from, "
+                                            "a watch --frames kept, anywhere.")
     p.add_argument("--window", metavar="RE")
     p.add_argument("--crop", metavar="WxH+X+Y")
-    p.add_argument("--seconds", type=float, default=2, metavar="SECS",
-                   help="how long to watch (2)")
+    p.add_argument("--seconds", type=float, metavar="SECS", help="how long to watch (2)")
     p.add_argument("--brief", type=float, default=100, metavar="MS",
                    help="a look held no longer than this is brief (100): a caret's blink is "
                         "longer")
@@ -1091,15 +1092,52 @@ def cmd_flicker(argv):
     p.add_argument("--save", metavar="DIR",
                    help="a sheet of each one's pictures here, made if it isn't: its box and "
                         "a tile round it, magnified, each labeled with its time")
+    p.add_argument("--frames", metavar="DIR",
+                   help="keep the watch in DIR, new or empty, for --from: each picture that "
+                        "changed, as a PNG, and when")
+    p.add_argument("--from", dest="kept", metavar="DIR",
+                   help="look at the watch --frames kept in DIR, not the screen: needs no "
+                        "session")
     a = p.parse_args(argv)
+    if a.kept is not None and (a.window is not None or a.crop is not None
+                               or a.seconds is not None or a.frames is not None):
+        p.error("--from is a watch already kept: it takes no --window, --crop, --seconds or "
+                "--frames")
+    checking = getattr(playing, "checking", False)
+    if a.kept is not None:
+        try:
+            frames, size, a.seconds, taken = flicker.kept(a.kept)
+        except ValueError as e:
+            if checking:
+                raise SessionError(str(e)) from None
+            sys.stderr.write(f"shotbox: {e}\n")
+            return 2
+    a.seconds = 2 if a.seconds is None else a.seconds
     if not (a.seconds > 0 and a.brief > 0 and a.times >= 2 and a.tile >= 1 and a.fuzz >= 0):
         p.error("--seconds, --brief and --tile are more than 0, --times 2 or more, --fuzz 0 "
                 "or more")
+    # A script's step, checked: what it reads, its kept watch and options,
+    # but nothing it would write.
+    if a.kept is not None and checking:
+        try:
+            flicker.ready(a.ignore)
+        except ValueError as e:
+            raise SessionError(str(e)) from None
+        raise Checked
     try:
-        found, taken, changed = inside().flicker(
-            a.seconds, window=a.window, crop=a.crop, tile=a.tile, brief=a.brief / 1000,
-            times=a.times, fuzz=a.fuzz, ignore=a.ignore, save=a.save)
-    except SessionError as e:
+        if a.kept is not None:
+            ignore = flicker.ready(a.ignore, a.save)
+            try:
+                found, taken, changed = flicker.watch(
+                    frames, size, a.seconds, taken, tile=a.tile, brief=a.brief / 1000,
+                    times=a.times, fuzz=a.fuzz, ignore=ignore, save=a.save)
+            except OSError as e:
+                raise ValueError(f"can't run ImageMagick: {e.strerror or e}") from None
+        else:
+            found, taken, changed = inside().flicker(
+                a.seconds, window=a.window, crop=a.crop, tile=a.tile, brief=a.brief / 1000,
+                times=a.times, fuzz=a.fuzz, ignore=a.ignore, save=a.save, frames=a.frames)
+    except (SessionError, ValueError) as e:
         sys.stderr.write(f"shotbox: {e}\n")
         return 2
     if taken < 2 * a.seconds / (a.brief / 1000):

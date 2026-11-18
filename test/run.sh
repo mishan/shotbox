@@ -835,6 +835,12 @@ cat "$tmp/lint.log"
 fails=$((fails + $(grep -c '^FAIL' "$tmp/lint.log" || true)))
 [ $st = 0 ] || grep -q "^FAIL" "$tmp/lint.log" || fail "lint_test.py: status $st"
 
+# flicker.watch() and --from, on frames made by hand at exact times: no display.
+set +e; python3 "$here/flicker_test.py" "$sb" > "$tmp/flickerf.log" 2>&1; st=$?; set -e
+cat "$tmp/flickerf.log"
+fails=$((fails + $(grep -c '^FAIL' "$tmp/flickerf.log" || true)))
+[ $st = 0 ] || grep -q "^FAIL" "$tmp/flickerf.log" || fail "flicker_test.py: status $st"
+
 # a11y contrast --from, on trees and pictures made by hand: no display or bus.
 set +e; python3 "$here/contrast_test.py" "$sb" > "$tmp/contrastf.log" 2>&1; st=$?; set -e
 cat "$tmp/contrastf.log"
@@ -1026,6 +1032,45 @@ for c in "flip 30 1 ^flicker: 200x120[+]0[+]0, .* every [1-5][0-9] ms, (#000000 
 done
 [ -z "$flickered" ] && ok "flicker: switching every 30 ms, not every 500; a flash; a strip; not a still window, motion, scrolling, a line or an edge; a sheet of each" \
   || fail "flicker:$flickered"
+# --frames keeps the watch: each picture that changed, a PNG of what's
+# watched, at its time, in order, and how many were taken; a directory
+# that isn't empty is refused before watching.
+set +e; "$sb" run -- sh -c "'$here/window.py' fl flip 30 & '$sb' wait window fl >/dev/null &&
+  '$sb' flicker --window fl --seconds 1.6 --frames '$tmp/watched'" > "$tmp/watched.out"; st=$?
+"$sb" run -- sh -c "'$sb' flicker --seconds 1.6 --frames '$tmp/watched'" > /dev/null 2> "$tmp/watched.err"; again=$?
+set -e
+[ $st = 1 ] && [ $again = 2 ] && grep -q "isn't empty" "$tmp/watched.err" \
+  && python3 -c "import json, subprocess, sys; d = sys.argv[1]; m = json.load(open(d + '/frames.json'))
+f = m['frames']; ats = [x['at'] for x in f]
+assert m['version'] == 1 and m['seconds'] == 1.6 and m['size'] == [200, 120], m
+assert len(f) > 20 and m['taken'] >= len(f) and ats == sorted(set(ats)) and ats[0] >= 0, m
+sizes = subprocess.run(['identify', '-format', '%w %h\n', *(d + '/' + x['file'] for x in f)],
+                       capture_output=True, text=True, check=True).stdout.split('\n')[:-1]
+assert set(sizes) == {'200 120'} and len(sizes) == len(f), sizes" "$tmp/watched" \
+  && ok "flicker --frames keeps each picture that changed, and when; not over another watch" \
+  || { fail "flicker --frames ($st, $again)"; cat "$tmp/watched.out" "$tmp/watched.err"; ls "$tmp/watched" | head || true; }
+# --from what --frames kept says what the live watch did, outside the
+# session: a square flickering, one flashing, and a still window.
+for c in "flip 30 1" "flash 40 1" "still - 0"; do
+  set -- $c; d=$tmp/kept-$1
+  set +e; "$sb" run -- sh -c "'$here/window.py' fl $1 $2 & '$sb' wait window fl >/dev/null &&
+    '$sb' flicker --window fl --seconds 1.6 --frames '$d'" > "$d.out" 2> "$d.err"; st=$?
+  env -u DISPLAY -u WAYLAND_DISPLAY "$sb" flicker --from "$d" > "$d.from" 2> "$d.ferr"; from=$?
+  set -e
+  [ $st = "$3" ] && [ $from = $st ] && cmp -s "$d.out" "$d.from" && cmp -s "$d.err" "$d.ferr" \
+    && ok "flicker --from says what the live watch that kept it did ($1)" \
+    || { fail "flicker --from, against live ($1: $st, $from)"
+         { diff "$d.out" "$d.from"; diff "$d.err" "$d.ferr"; } || true; }
+done
+# A script's steps are checked before any plays: a kept watch read, but
+# no --save made, and one that isn't there stops the script.
+printf 'flicker --from %s --save %s\nflicker --from %s\n' "$tmp/kept-flip" "$tmp/play-sheets" \
+  "$tmp/play-none" > "$tmp/play-kept"
+set +e; "$sb" run -- "$sb" play "$tmp/play-kept" > /dev/null 2> "$tmp/play-kept.err"; st=$?; set -e
+[ $st != 0 ] && grep -q "2: can't read $tmp/play-none/frames.json" "$tmp/play-kept.err" \
+  && [ ! -e "$tmp/play-sheets" ] \
+  && ok "play: a flicker --from step checked first, writing nothing; one with no kept watch stops it" \
+  || { fail "play, flicker --from ($st)"; cat "$tmp/play-kept.err"; }
 
 # chords LOG [SESSION OPTIONS]: Shift in a chord, into cat in a terminal:
 # the symbol on the key's shifted level, as on a keyboard (A, !, +), and

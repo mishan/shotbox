@@ -21,7 +21,6 @@ import collections
 import contextlib
 import difflib
 import fcntl
-import functools
 import json
 import os
 import re
@@ -549,7 +548,7 @@ class Screen:
         return at, *place
 
     def flicker(self, seconds=2.0, window=None, crop=None, tile=16, brief=0.1, times=8,
-                fuzz=6.0, ignore=(), save=None):
+                fuzz=6.0, ignore=(), save=None, frames=None):
         """Watch the display, or the window named `window`, cropped, for
         `seconds`, as fast as pictures come, for flicker and flashes (see
         flicker.py): tiles `tile` pixels square, a state no longer than
@@ -558,8 +557,10 @@ class Screen:
         left out. [dict(kind="flicker" or "flash", box, at, changes,
         every, looks)], a box of tiles each, in order, how many pictures
         were taken, and how many of them changed. With `save`, a directory,
-        each one's pictures there as a sheet (see `_sheet`), its path its
-        "sheet", or "unsaved" if it couldn't be written."""
+        each one's pictures there as a sheet (see `flicker._sheet`), its
+        path its "sheet", or "unsaved" if it couldn't be written. With
+        `frames`, a directory, new or empty, the watch kept there, before
+        it's looked at, for `flicker --from` (see `flicker.keep`)."""
         from . import flicker
         w = self.window(window) if window else None
         geometry = r"(\d+)x(\d+)\+(\d+)\+(\d+)"
@@ -569,22 +570,10 @@ class Screen:
             if not (m and int(m[1]) and int(m[2])):
                 self.fail(f"a crop is WIDTHxHEIGHT+X+Y, at least 1x1, not {crop}")
             area = tuple(int(n) for n in m.groups())
-        skip = []
-        for g in ignore:
-            m = re.fullmatch(geometry, g)
-            if not m:
-                self.fail(f"what to ignore is WIDTHxHEIGHT+X+Y, not {g}")
-            skip.append(tuple(int(n) for n in m.groups()))
-        if save is not None:
-            if not str(save):
-                self.fail("a directory to save to, not ''")
-            try:
-                Path(save).mkdir(parents=True, exist_ok=True)
-                tempfile.TemporaryFile(dir=save).close()
-            except (FileExistsError, NotADirectoryError):
-                self.fail(f"can't save to {save}: it, or a directory it's in, is a file")
-            except OSError as e:
-                self.fail(f"can't save to {save}: {e.strerror}")
+        try:
+            skip = flicker.ready(ignore, save, frames)
+        except ValueError as e:
+            self.fail(str(e))
         fd, png = tempfile.mkstemp(".png", dir=self.env["SHOTBOX_SCRATCH"])
         os.close(fd)
 
@@ -609,301 +598,30 @@ class Screen:
 
         # Every picture that differs from the one before, compressed: the
         # program draws at its own rate, and what holds is said by time.
-        shots, last, taken, start = [], None, 0, time.monotonic()
+        shots, last, taken, size, start = [], None, 0, None, time.monotonic()
         try:
             while time.monotonic() - start < seconds:
                 t0 = time.monotonic()
                 got = picture()
                 taken += 1
+                if shots and got[:2] != size:
+                    self.fail(f"the {'window' if w else 'display'} changed size as it was "
+                              "watched")
+                size = got[:2]
                 if got[2] != last:
                     shots.append(((t0 + time.monotonic()) / 2 - start, zlib.compress(got[2], 1)))
                     last = got[2]
         finally:
             Path(png).unlink(missing_ok=True)
-        width, height = got[:2]
-        times_ = [t for t, _ in shots]
-        across = -(-width // tile)
-        looks, before = [], None
-        for _, data in shots:
-            now = zlib.decompress(data)
-            looks.append(flicker.means(now, width, height, tile, before, looks and looks[-1]))
-            before = now
-        # A tile's states, by its mean colors, a change of a quarter of fuzz
-        # a new one, so a band a pixel or two wide is seen; the pixels decide.
-        helds, wanted = {}, {}
-        for n in range(len(looks[0])):
-            tx, ty = n % across * tile, n // across * tile
-            if any(gx < tx + tile and tx < gx + gw and gy < ty + tile and ty < gy + gh
-                   for gw, gh, gx, gy in skip):
-                continue
-            helds[n] = flicker.states(times_, [frame[n] for frame in looks], seconds,
-                                      fuzz * 2.55 / 4)
-            for k in flicker.needs(helds[n], brief):
-                wanted.setdefault(k, []).append(n)
-        # Each picture a tile is looked at in, decompressed once, for those.
-        tiles_in = {}
-        for k in sorted(wanted):
-            f = zlib.decompress(shots[k][1])
-            for n in wanted[k]:
-                tx, ty = n % across * tile, n // across * tile
-                x1, y1 = min(tx + tile, width), min(ty + tile, height)
-                tiles_in[n, k] = b"".join(f[(y * width + tx) * 3:(y * width + x1) * 3]
-                                          for y in range(ty, y1))
-        found = {"flicker": {}, "flash": {}}
-        for n, held in helds.items():
-            tx, ty = n % across * tile, n // across * tile
-            flickering, flashed = flicker.find(held, brief, times, fuzz,
-                                               lambda k, n=n: tiles_in[n, k],
-                                               min(tile, width - tx))
-            if flickering:
-                found["flicker"][n] = flickering
-            elif flashed:
-                found["flash"][n] = flashed
-        # A look that's in the picture before or after, up or down the
-        # screen, is text scrolling: lines alike, one where another was, or
-        # drawn again the same after a blank, aren't a look coming back,
-        # nor a line shown once a flash; a run is scrolling if as many of its
-        # looks are as aren't. One color all over says nothing; another look the same
-        # down the tile, a gradient across, a border, a strip, is anywhere
-        # up or down, and holds its place as scrolling text doesn't. A
-        # flicker's look may be a near copy, moved, as text scrolled by
-        # fractions of a pixel is; that's asked of about eight of its
-        # pictures, by an odd step so both looks are, as finding it costs
-        # more, and they're scrolling if as many of those are as aren't.
-        few = {(n, k) for n, f in found["flicker"].items() for k in f[5][::len(f[5]) // 8 | 1]}
-        ask = {}
-        for n, k in ([(n, k) for n, f in found["flicker"].items() for k in f[5]]
-                     + [(n, k) for n, fs in found["flash"].items() for f in fs for k in f[4:]]):
-            for j in (k - 1, k + 1):
-                ask.setdefault(j, []).append((n, k))
-        scrolled, say = set(), set()
-        for j in sorted(set(ask) & set(range(len(shots)))):
-            f, columns = zlib.decompress(shots[j][1]), {}
-            for n, k in ask[j]:
-                tx, ty = n % across * tile, n // across * tile
-                step = (min(tx + tile, width) - tx) * 3
-                here = tiles_in[n, k]
-                if (n, k) in scrolled or here == here[:3] * (len(here) // 3):
-                    continue
-                say.add((n, k))
-                if here == here[:step] * (len(here) // step):
-                    continue
-                if tx not in columns:
-                    columns[tx] = b"".join(f[(y * width + tx) * 3:(y * width + tx) * 3 + step]
-                                           for y in range(height))
-                at = columns[tx].find(here)
-                while at >= 0 and (at % step or at == ty * step):
-                    at = columns[tx].find(here, at + 1)
-                if at >= 0 or (n, k) in few and flicker.moved(here, f, width, tx, ty,
-                                                               step // 3, tile, fuzz):
-                    scrolled.add((n, k))
-        def scrolling(n, pictures):
-            told = [(n, k) in scrolled for k in pictures if (n, k) in say]
-            return bool(told) and 2 * sum(told) >= len(told)
-        found["flicker"] = {n: f for n, f in found["flicker"].items() if not scrolling(n, f[5])
-                            and not scrolling(n, [k for k in f[5] if (n, k) in few])}
-        found["flash"] = {n: [f for f in fs if not scrolling(n, f[4:])]
-                          for n, fs in found["flash"].items()}
-        out, seen = [], []
-        for bx, by, bw, bh, group in flicker.boxes(found["flicker"], across, tile):
-            bw, bh = min(bw, width - bx), min(bh, height - by)    # tiles at the edge
-            # The box said as its tile that changed most does.
-            at, changes, every, a, b, ks = max((found["flicker"][n] for n in group),
-                                               key=lambda f: f[1])
-            out.append(dict(kind="flicker", box=f"{bw}x{bh}+{bx}+{by}", at=at, changes=changes,
-                            every=every, looks=(flicker.hex_of(a), flicker.hex_of(b))))
-            # A first look and eight changes: both looks, coming back.
-            seen.append(((bx, by, bw, bh), [ks[0] - 1, *ks[:8]]))
-        flashes = found["flash"]
-        down = len(looks[0]) // across
-
-        def beside(group):
-            """The tiles round a group of tiles, not in it."""
-            at = ((m % across, m // across) for m in group)
-            return {(y + dy) * across + x + dx for x, y in at
-                    for dx in (-1, 0, 1) for dy in (-1, 0, 1)
-                    if 0 <= x + dx < across and 0 <= y + dy < down} - set(group)
-
-        def toward(k, n):
-            """How tile n's mean color moved in picture k."""
-            return [a - b for a, b in zip(looks[k][n], looks[k - 1][n])]
-
-        def along(way, d):
-            """Whether a tile's mean color moving `d` went `way`."""
-            return (sum(a * b for a, b in zip(way, d))
-                    > 0.8 * sum(c * c for c in way) ** 0.5 * sum(c * c for c in d) ** 0.5)
-
-        def between(p, a, b):
-            """Whether color p is within twice fuzz of the way from a to b."""
-            ab = [y - x for x, y in zip(a, b)]
-            t = max(0, min(1, sum((q - x) * d for q, x, d in zip(p, a, ab))
-                           / (sum(d * d for d in ab) or 1)))
-            return near(p, [x + t * d for x, d in zip(a, ab)])
-
-        @functools.lru_cache(maxsize=None)
-        def turned(m, i):
-            """Tile m's colors where it changed in its state i, before and
-            after, or None."""
-            old, new = tiles_in.get((m, helds[m][i - 1][3])), tiles_in.get((m, helds[m][i][3]))
-            return old and new and flicker.colors(old, new, flicker.changed(old, new, fuzz / 4))
-
-        def near(p, q):
-            """Whether two colors are within twice fuzz of each other."""
-            return sum((x - y) ** 2 for x, y in zip(p, q)) ** 0.5 <= 2 * fuzz * 2.55
-
-        def brings(m, i, flashed):
-            """Whether tile m's state i took the colors of a flash's, each
-            (look, then) in `flashed`, or a part of them, or they its. One
-            whose pictures weren't kept, as no run of its own needed them,
-            can't say, and is taken to, so motion isn't missed."""
-            if not turned(m, i):
-                return True
-            was, took = turned(m, i)
-            return any(between(look, then, took) or between(took, was, look)
-                       for look, then in flashed)
-
-        def swapped(n, m):
-            """Whether tile m, as flashing tile n changed, went the other
-            way, from n's flash look to the look n had: something thin
-            stepping from one into the other, as an aliased line's step
-            does, or a square leaving a tile as it enters the next."""
-            k, look, then = now[n][4], now[n][2], now[n][3]
-            if not along([-c for c in toward(k, n)], toward(k, m)):
-                return False
-            i = next((i for i, st in enumerate(helds[m]) if i and st[3] == k), None)
-            return (bool(i and turned(m, i))
-                    and near(turned(m, i)[0], look) and near(turned(m, i)[1], then))
-
-        def took(m, i):
-            """Whether tile m's state i is the color of one of the flash's
-            looks, being under it."""
-            return bool(turned(m, i)) and any(near(turned(m, i)[1], f[2]) for f in now.values())
-
-        def still(n, i, t):
-            """Whether tile n, before its state i, held a look longer than
-            `brief`, or since watching began, up to within `brief` of `t`:
-            one busy all along, a scene animating, a terminal scrolling,
-            didn't."""
-            for st in reversed(helds[n][:i]):
-                if st[1] + st[2] < t - brief:
-                    return False
-                if st[2] > brief or st is helds[n][0]:
-                    return True
-            return False
-
-        done = set()
-        for k in sorted({f[4] for fs in flashes.values() for f in fs}):
-            # Tiles that flashed in the same picture make a box. Something
-            # moving through turns a tile beside it the same way, briefly,
-            # as it passes, within `brief`, or a picture, before or after,
-            # if pictures come slower; a flash doesn't, and what changes
-            # beside it in the same picture, another way, or for longer, is
-            # something else: a caret, a spinner, a word in the flash.
-            now = {n: f for n, fs in flashes.items() for f in fs
-                   if f[4] == k and (n, k) not in done}
-            if not now:
-                continue
-            # What showed only while the flash did, one color or not, is one
-            # thing with it, and what's beside that is what's beside it: a
-            # square passing, a sliver of it in a tile at the window's edge,
-            # or lines of text drawn once in a terminal scrolling.
-            gone = max(f[5] for f in now.values())
-            # A flash drawn torn, a part of it a picture later, is one: what
-            # flashed before it was gone is with it, not something moving.
-            now.update({n: f for n, fs in flashes.items() for f in fs if k < f[4] < gone})
-            done |= {(n, f[4]) for n, f in now.items()}
-            # Of what changed with it, a tile busy before isn't with it,
-            # unless the flash covered it, taking its color.
-            with_it = {m for m, held in helds.items()
-                       for i, (st, after) in enumerate(zip(held, held[1:]))
-                       if st[3] == k and after[3] <= gone
-                       and (still(m, i, times_[k]) or took(m, i))}
-            for bx, by, bw, bh, group in flicker.boxes(now.keys() | with_it, across, tile):
-                if not now.keys() & set(group):
-                    continue
-                # Most of the box gone other ways than the flash did is a
-                # region drawn anew, as a terminal scrolling a page at a time
-                # does: its caret gone for the page.
-                went = [sum(c) for c in zip(*(toward(now[n][4], n) for n in group if n in now))]
-                if 2 * sum(not along(went, toward(k, n)) for n in group if n not in now) > len(group):
-                    continue
-                # Nor is it where a thin thing stepped out of, into a tile of
-                # the box or beside it, for that picture.
-                if any(swapped(n, m) for n in group if n in now
-                       for m in set(group) | beside(group) if m != n and m in helds):
-                    continue
-                # And it passes through what held still, with its colors: a
-                # tile beside busy all along, a scene animating, or going
-                # darker as text scrolls in by a black flash, says nothing.
-                shown = [now[n][2:4] for n in group if n in now]
-                if any(along(went, toward(st[3], m)) for m in beside(group) if m in helds
-                       for i, st in enumerate(helds[m]) if i and st[3] != k and st[2] <= brief
-                       and (abs(st[3] - k) == 1 or abs(st[1] - times_[k]) <= brief)
-                       and still(m, i, st[1]) and brings(m, i, shown)):
-                    continue
-                bw, bh = min(bw, width - bx), min(bh, height - by)
-                at, held_for, look, then, first, _ = min(
-                    (now[n] for n in group if n in now), key=lambda f: f[0])
-                # Torn, till the last of it is gone.
-                after = max(now[n][5] for n in group if n in now)
-                out.append(dict(kind="flash", box=f"{bw}x{bh}+{bx}+{by}", at=at, changes=2,
-                                every=held_for,
-                                looks=(flicker.hex_of(then), flicker.hex_of(look))))
-                seen.append(((bx, by, bw, bh), [*range(first - 1, after)][:8] + [after]))
-        order = sorted(range(len(out)), key=lambda i: out[i]["at"])
-        if save is not None:
-            for number, i in enumerate(order, 1):
-                f = out[i]
-                path = Path(save) / f"{number:0{len(str(len(out)))}d}-{f['kind']}-{f['box']}.png"
-                # One not written leaves the rest, and what was found, to be said.
-                try:
-                    f["sheet"] = str(self._sheet(path, shots, seen[i][1], seconds, (width, height),
-                                                 seen[i][0], tile))
-                except (OSError, subprocess.CalledProcessError):
-                    f["unsaved"] = str(path)
-        return [out[i] for i in order], taken, len(shots)
-
-    def _sheet(self, out, shots, ks, end, size, box, margin):
-        """Pictures `ks` of `shots`, (seconds, compressed RGB `size`) of a
-        watch that ended at `end`, cut to `box` (x, y, width, height) and
-        `margin` round it, the box outlined, each labeled with when it
-        showed, in order, as one PNG at `out` no more than 1920 pixels each
-        way: magnified, a pixel a square, up to 8 times, so a band a pixel
-        wide is seen, or shrunk, its label not, to fit."""
-        (width, height), (bx, by, bw, bh) = size, box
-        x0, y0 = max(0, bx - margin), max(0, by - margin)
-        x1, y1 = min(width, bx + bw + margin), min(height, by + bh + margin)
-        cw, ch = x1 - x0, y1 - y0
-        # As near square as it goes: a strip down the screen side by side,
-        # one across it one above another.
-        across = max(1, min(len(ks), round((len(ks) * ch / cw) ** 0.5)))
-        down = -(-len(ks) // across)
-        # A cell's border is 2 pixels, its label 17 high.
-        fit = min((1920 // across - 2) / cw, (1920 // down - 20) / ch)
-        scale = min(8, int(fit)) or fit
-        grow = (["-scale", f"{scale * 100}%"] if scale >= 1
-                else ["-resize", f"{int(cw * scale)}x{int(ch * scale)}!"])
-        left, top = int((bx - x0) * scale) - 1, int((by - y0) * scale) - 1
-        right, bottom = int((bx - x0 + bw) * scale), int((by - y0 + bh) * scale)
-        with tempfile.TemporaryDirectory(dir=self.env["SHOTBOX_SCRATCH"]) as tmp:
-            cells = []
-            for n, k in enumerate(ks):
-                t, data = shots[k]
-                till = shots[k + 1][0] if k + 1 < len(shots) else max(end, t)
-                data = zlib.decompress(data)
-                cells.append(Path(tmp) / f"{n}.png")
-                subprocess.run([*x.CONVERT, "-size", f"{cw}x{ch}", "-depth", "8", "rgb:-", *grow,
-                                "-fill", "none", "-stroke", "magenta", "+antialias",
-                                # Two wide, so a sheet seen smaller keeps it.
-                                "-draw", f"rectangle {left},{top} {right},{bottom}",
-                                "-draw", f"rectangle {left - 1},{top - 1} {right + 1},{bottom + 1}",
-                                "-antialias", "-stroke", "none", "-fill", "white",
-                                "-background", "black", "+size", *x.font(), "-pointsize", "14",
-                                f"label:{t:.3f}\u2013{till:.3f}s", "-gravity", "center", "-append",
-                                "-bordercolor", "gray50", "-border", "1", str(cells[-1])],
-                               input=b"".join(data[(y * width + x0) * 3:(y * width + x1) * 3]
-                                              for y in range(y0, y1)), check=True)
-            return x.sheet(cells, out, across=across)
+        if not shots:
+            self.fail(f"no picture taken in {seconds:g} s")
+        if frames is not None:
+            try:
+                flicker.keep(frames, shots, size, seconds, taken)
+            except OSError as e:
+                self.fail(f"can't keep the watch in {frames}: {e.strerror}")
+        return flicker.watch(shots, size, seconds, taken, tile, brief, times, fuzz, skip, save,
+                             compressed=True)
 
     def wait_announce(self, pattern, timeout=30):
         """Wait for a program to have announced something matching
