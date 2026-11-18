@@ -414,7 +414,7 @@ test('Chromium on an --a11y session: its tree, a click by name or by its action,
         'run', '--a11y', '--',
         'node', path.join(here, 'a11y_browser.mjs'), shotbox,
     ], { encoding: 'utf8' });
-    const { tree, clicked, pressed, picked, below, contrast, ignored, behind, field, typedLint, typedTree, runs, fading, walk, around, long, further, nearest, ends, said, hint, whole, crash } = JSON.parse(out);
+    const { tree, clicked, pressed, picked, below, contrast, ignored, behind, field, typedLint, typedTree, runs, fading, walk, around, long, further, nearest, ends, said, hint, whole, crash, replays } = JSON.parse(out);
 
     assert.match(tree, /button "Save"/);
     /* Scrolled out of view: not showing, but still in a page's tree. */
@@ -514,6 +514,18 @@ test('Chromium on an --a11y session: its tree, a click by name or by its action,
     assert.equal(crash.status, 0, crash.err);
     assert.match(crash.err, /"a11y-crashed.*": no page in the browser's accessible tree \(a crashed tab/);
     assert.match(crash.out, /button "Save"/);
+    /* contrast --from what --save wrote, outside the session, says what
+       the live run did; nothing saved but its pictures has what's typed
+       in a field (a contenteditable's text is its nodes' names, in any
+       tree). */
+    assert.deepEqual(Object.keys(replays).sort(),
+                     ['a11y-fading', 'a11y-modal', 'a11y-still', 'a11y-unshown', 'faint', 'typed']);
+    for (const [key, { live, from, typed }] of Object.entries(replays))
+    {
+        assert.ok(live.out, `${key}: ${live.err}`);
+        assert.deepEqual(from, live, key);
+        assert.ok(!typed || ['a11y-fading', 'a11y-still'].includes(key), key);
+    }
 });
 
 test('Firefox on an --a11y session: contrast by the runs of a node\'s own text',
@@ -557,7 +569,8 @@ test('Firefox on an --a11y session: contrast by the runs of a node\'s own text',
             firefox --kiosk --new-instance --profile "$1/profile" --width 1280 --height 900 \
               "file://$1/page.html" 2>/dev/null &
             "$0" wait node '^Faint words$' --window 'a11y-firefox.*' --timeout 60 >/dev/null
-            "$0" a11y contrast --json --passes --window 'a11y-firefox.*'; kill $!`, shotbox, dir],
+            "$0" a11y contrast --json --passes --window 'a11y-firefox.*' --save "$1/saved"
+            kill $!`, shotbox, dir],
                               { encoding: 'utf8' });
 
         assert.ok(got.stdout.trim(), `contrast said nothing (status ${got.status}): ${got.stderr}`);
@@ -610,6 +623,13 @@ test('Firefox on an --a11y session: contrast by the runs of a node\'s own text',
                 assert.match(what, look, `${id} ${list} ${text}`);
             }
         }
+        /* From what it saved, outside the session, the same. */
+        const from = spawnSync(shotbox, ['a11y', 'contrast', '--json', '--passes', '--from',
+                                         path.join(dir, 'saved')],
+                               { encoding: 'utf8', env: { PATH: process.env.PATH } });
+
+        assert.equal(from.stdout, got.stdout, from.stderr);
+        assert.equal(from.status, 0, from.stderr);
     }
     finally
     {

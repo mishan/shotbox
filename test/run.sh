@@ -835,6 +835,12 @@ cat "$tmp/lint.log"
 fails=$((fails + $(grep -c '^FAIL' "$tmp/lint.log" || true)))
 [ $st = 0 ] || grep -q "^FAIL" "$tmp/lint.log" || fail "lint_test.py: status $st"
 
+# a11y contrast --from, on trees and pictures made by hand: no display or bus.
+set +e; python3 "$here/contrast_test.py" "$sb" > "$tmp/contrastf.log" 2>&1; st=$?; set -e
+cat "$tmp/contrastf.log"
+fails=$((fails + $(grep -c '^FAIL' "$tmp/contrastf.log" || true)))
+[ $st = 0 ] || grep -q "^FAIL" "$tmp/contrastf.log" || fail "contrast_test.py: status $st"
+
 # shotbox mutate's targets and verdicts.
 set +e; python3 "$here/mutate_test.py" > "$tmp/mutate.log" 2>&1; st=$?; set -e
 cat "$tmp/mutate.log"
@@ -1226,14 +1232,17 @@ if atspi; then
     && grep -q '/panel\[6\]: focusable panel with no name$' "$tmp/lint" \
     && ok "a11y: lint finds the icon button, the image and the drawing area with no name" \
     || { fail "a11y: lint ($st)"; cat "$tmp/lint"; }
-  # Lint knows roles by the names libatspi gives them, as a saved tree has
-  # them: each role it lists is named as libatspi names it.
+  # Lint and contrast know roles by the names libatspi gives them, as a
+  # saved tree has them: each role they list is named as libatspi names it.
   out=$(PYTHONPATH="$here/.." python3 -c "import gi; gi.require_version('Atspi', '2.0')
 from gi.repository import Atspi
-from shotbox.a11y import CONTAINERS, CONTROLS, role_names
-print(*[r for r in CONTROLS + CONTAINERS + ('TEXT', 'IMAGE') if hasattr(Atspi.Role, r)
-        and Atspi.role_get_name(getattr(Atspi.Role, r)) not in role_names((r,))])")
-  [ -z "$out" ] && ok "a11y: lint names each role it lists as libatspi does" || fail "a11y: lint's role names: $out"
+from shotbox.a11y import CONTAINERS, CONTROLS, EDGED, IMAGES, NAMED, TEXTLESS, TEXTS, role_names
+print(*[r for r in CONTROLS + CONTAINERS + TEXTS + NAMED + IMAGES + TEXTLESS + EDGED + (
+            'TEXT', 'IMAGE', 'DOCUMENT_WEB', 'SCROLL_PANE', 'DIALOG', 'ALERT', 'COMBO_BOX')
+        if hasattr(Atspi.Role, r) and Atspi.role_get_name(getattr(Atspi.Role, r))
+        not in role_names((r,))])")
+  [ -z "$out" ] && ok "a11y: lint and contrast name each role they list as libatspi does" \
+    || fail "a11y: lint's and contrast's role names: $out"
   "$sb" run --a11y -- sh -c "'$app' & FORCE_COLOR=1 '$sb' a11y lint --window a11y-test" > "$tmp/lintc" || true
   grep -q "^${esc}\[2m.*/image\[5\]${esc}\[0m: image with no name" "$tmp/lintc" \
     && ok "a11y: lint, at a terminal, dims each node's path" || { fail "a11y: lint's color"; cat -v "$tmp/lintc"; }
@@ -1527,6 +1536,58 @@ assert (len(faint) == 1 and re.fullmatch('text behind a modal ' + want, faint[0]
       2>/dev/null | grep -q '/label\[0\]: text too small to measure' \
     && ok "a11y: contrast, GTK 3: not a switch, a framed text view, light text, large text, a dot, which passes alone" \
     || { fail "a11y: contrast, GTK 3 ($st)"; cat "$tmp/contrast"; }
+  # --save keeps what was read live of each node, and the pictures.
+  rm -rf "$tmp/saved"
+  "$sb" run --a11y -- sh -c "'$here/window.py' g3 contrast &
+    '$sb' a11y contrast --edges 3 --window g3 --save '$tmp/saved'" > "$tmp/contrast2" 2>&1 || true
+  python3 -c "import json, os, sys; d = sys.argv[1]
+t, p = json.load(open(d + '/tree.json')), json.load(open(d + '/pictures.json'))
+by = {n['path'].split('/', 1)[-1]: n for n in t}
+assert [n.get('switch') for n in t if n['role'] == 'toggle button'] == [True], t
+assert by['filler[0]/label[1]']['color'] == '#5f5670' and by['filler[0]/label[4]']['large'], t
+assert t[0]['depth'] == 0 and t[0]['toolkit'].startswith('gtk 3.') and t[0]['window'], t[0]
+assert not [k for n in t for k in n if k.startswith('_')], t
+assert p['version'] == 1 and len(p['samples']) == 5, p
+assert all(os.path.exists(d + '/' + f['file']) for f in [{'file': p['screen']}] + p['samples']), p" \
+    "$tmp/saved" && ok "a11y: contrast --save keeps what it read of each node, and its pictures" \
+    || { fail "a11y: contrast --save"; cat "$tmp/contrast2"; ls -l "$tmp/saved" || true; }
+  # --from what --save wrote says what the live run said, with no session:
+  # GTK 3, with --edges, and another program that doesn't answer; text
+  # blinking, and moving; a GTK 4 window behind a modal. GTK 4's own are
+  # notes.
+  cat > "$tmp/replay.sh" <<'EOF'
+sb=$1 here=$2 d=$3 win=$4; shift 4
+"$sb" wait window "$win" >/dev/null
+[ "$win" != g3 ] || { "$here/gtk4_window.py" & app=$!; "$sb" wait node Save >/dev/null; kill -STOP $app; }
+# All windows for GTK 3's, so the one that doesn't answer counts.
+w=$win; [ -z "${app-}" ] || w=
+"$sb" a11y contrast "$@" --timeout 2 ${w:+--window "$w"} --save "$d" > "$d.out" 2> "$d.err"
+echo $? > "$d.st"
+[ -z "${app-}" ] || { kill -CONT $app; kill $app; }
+EOF
+  i=0
+  for c in "$here/window.py g3 contrast;g3;--edges 3 --passes" \
+           "$here/window.py blink blinking;blink;--strict --passes" \
+           "$here/window.py mv moving;mv;--json --passes" "$app faint modal;a11y-test;--json"; do
+    cmd=${c%%;*} rest=${c#*;}; win=${rest%%;*} args=${rest#*;} i=$((i + 1)) d=$tmp/replay$i
+    "$sb" run --a11y -- sh -c "$cmd & sh '$tmp/replay.sh' '$sb' '$here' '$d' '$win' $args" \
+      >/dev/null 2>&1 || true
+    set +e
+    env -u DISPLAY -u WAYLAND_DISPLAY "$sb" a11y contrast $args --from "$d" > "$d.from" 2> "$d.ferr"
+    st=$?; set -e
+    [ -s "$d.out" ] && [ "$st" = "$(cat "$d.st")" ] && cmp -s "$d.out" "$d.from" && cmp -s "$d.err" "$d.ferr" \
+      && { [ "$win" != g3 ] || grep -q "not all checked: program" "$d.ferr"; } \
+      && ok "a11y: contrast --from says what the live run that saved it did ($win)" \
+      || { fail "a11y: contrast --from, against live ($win: $st, $(cat "$d.st" 2>/dev/null))"
+           { diff "$d.out" "$d.from"; diff "$d.err" "$d.ferr"; } || true; }
+  done
+  "$sb" run --a11y -- sh -c "'$app' faint & '$sb' wait window a11y-test >/dev/null
+    '$sb' a11y contrast --window a11y-test --save '$tmp/replay4k'" >/dev/null 2>&1 || true
+  set +e; "$sb" a11y contrast --from "$tmp/replay4k" > "$tmp/replay4k.from" 2>&1; st=$?; set -e
+  [ $st = 2 ] && grep -q 'label\[7\]: text not measured from a file: GTK 4 is measured live only$' "$tmp/replay4k.from" \
+    && ! grep -v 'not measured from a file: GTK 4 is measured live only$\|^shotbox: nothing measured' "$tmp/replay4k.from" \
+    && ok "a11y: contrast --from: GTK 4's, each a note" \
+    || { fail "a11y: contrast --from, GTK 4 ($st)"; cat "$tmp/replay4k.from"; }
   # A faint label dark half a second in two is changing, whenever the
   # first picture's taken, and with --strict fails; dark words sliding by
   # pass, though they've moved out of where they were first seen.
