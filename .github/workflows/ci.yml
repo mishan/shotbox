@@ -77,10 +77,12 @@ jobs:
           echo "Dir::Cache::Archives \"$HOME/apt\";" | sudo tee /etc/apt/apt.conf.d/90cached
           # The runner's own mirror stalls now and then (the EC2 one has, a
           # download at a time, for all 10 minutes); GitHub's Azure one
-          # answers, and apt retries a failed fetch. Security updates stay
-          # on security.ubuntu.com, which a mirror can list before it holds.
+          # answers, and apt retries a failed fetch. The runners name their
+          # mirrors in apt-mirrors.txt, which ubuntu.sources points to.
+          # Security updates stay on security.ubuntu.com, which a mirror can
+          # list before it holds.
           sudo sed -Ei 's#http://([a-z0-9-]+\.)*archive\.ubuntu\.com#http://azure.archive.ubuntu.com#' \
-            /etc/apt/sources.list.d/ubuntu.sources
+            $(ls /etc/apt/apt-mirrors.txt /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null)
           echo 'Acquire::Retries "3";' | sudo tee /etc/apt/apt.conf.d/80retries
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -155,7 +157,7 @@ jobs:
           echo "Dir::Cache::Archives \"$HOME/apt\";" | sudo tee /etc/apt/apt.conf.d/90cached
           # GitHub's Azure mirror, and retries, as for the tests.
           sudo sed -Ei 's#http://([a-z0-9-]+\.)*archive\.ubuntu\.com#http://azure.archive.ubuntu.com#' \
-            /etc/apt/sources.list.d/ubuntu.sources
+            $(ls /etc/apt/apt-mirrors.txt /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null)
           echo 'Acquire::Retries "3";' | sudo tee /etc/apt/apt.conf.d/80retries
       - uses: actions/cache@v6
         with:
@@ -206,7 +208,7 @@ jobs:
           echo "Dir::Cache::Archives \"$HOME/apt\";" | sudo tee /etc/apt/apt.conf.d/90cached
           # GitHub's Azure mirror, and retries, as for the tests.
           sudo sed -Ei 's#http://([a-z0-9-]+\.)*archive\.ubuntu\.com#http://azure.archive.ubuntu.com#' \
-            /etc/apt/sources.list.d/ubuntu.sources
+            $(ls /etc/apt/apt-mirrors.txt /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null)
           echo 'Acquire::Retries "3";' | sudo tee /etc/apt/apt.conf.d/80retries
       - uses: actions/cache@v6
         with:
@@ -242,7 +244,7 @@ jobs:
         run: |
           # GitHub's Azure mirror, and retries, as for the tests.
           sudo sed -Ei 's#http://([a-z0-9-]+\.)*archive\.ubuntu\.com#http://azure.archive.ubuntu.com#' \
-            /etc/apt/sources.list.d/ubuntu.sources
+            $(ls /etc/apt/apt-mirrors.txt /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null)
           echo 'Acquire::Retries "3";' | sudo tee /etc/apt/apt.conf.d/80retries
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
