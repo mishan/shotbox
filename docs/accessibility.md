@@ -33,13 +33,14 @@ Inside a session with `--a11y`:
   down and DX right (negative, up and left): a list by itself or by a
   row still in view (one scrolled out of it is refused, as `click`
   refuses it).
-- **`shotbox a11y contrast [--window RE] [--passes] [--strict]`** measures the contrast of
+- **`shotbox a11y contrast [--window RE] [--passes] [--strict] [--save DIR | --from DIR]`** measures the contrast of
   what each node draws against its background, and fails, a line each:
   `PATH: text 2.51:1, #a0a0a0 on #fafafb (at least 4.5)`; with `--passes`,
   what passes too: `PATH: text passes at 12.23:1, #323236 on #fafafb (at
   least 4.5)`; with `--strict`, what it couldn't measure fails too.
-  What's behind a modal dialog is said apart, and doesn't fail.
-  [Contrast](#contrast).
+  What's behind a modal dialog is said apart, and doesn't fail. `--save`
+  keeps the tree and pictures it measured; `--from` measures them again,
+  with no session. [Contrast](#contrast).
 - **`shotbox a11y speak [--keys KEY...] [--max 50] [--window RE]`**
   starts Orca in the session, presses Tab until the focus comes round
   (or the keys, in turn), and prints what Orca said after each press,
@@ -860,6 +861,45 @@ with `--strict` too. It's 2 as well, `shotbox: not all checked`, if a
 program didn't answer, as for `lint`.
 `Screen.contrast()` raises then, and MCP's `check_contrast` says so as
 an error.
+
+### From a saved run
+
+`--save DIR` writes what a live run measured to the directory DIR, and
+`--from DIR` measures it again, with no session, display, accessibility
+bus or PyGObject (ImageMagick reads the pictures): the same lines, JSON and exit status, other
+options alike (`--passes`, `--ignore`, `--strict`, the ratios), 2 for a
+program the live run said didn't answer. That's for a test that holds a
+page or window to its contrast without running it each time, or a
+failure kept to look at again. `--from` takes no `--window` or `--save`.
+
+DIR holds `tree.json`, the tree as `a11y tree --json` has it ([Reading
+the tree](#reading-the-tree)), with what contrast read live of each
+node, only where it isn't the default: a window's `toolkit` and its
+`window` bounds; `"showing": false` for a web node scrolled out of view; a web node's `contents`, its text, or for a field
+only `"filled": true`; the `runs` of a web node's own text, each with
+its `run`, `look` (its text attributes) and `bounds`; GTK 3's `switch`
+and own `color`; `large` text; `shut_by`, the name of a modal window
+shutting a window off; `"drawn": false` and `moved` (since the first
+picture); and `dom` and `text` for each node that could be said. Then
+`pictures.json`, which names the PNGs: `picture.png`, the screen as
+first pictured, and each sample after it (`samples`, each with the
+`x` and `y` it's from), and each control not seen with the pointer
+over it, only its box (`hovers`). A file that isn't one of these, or a
+sample that doesn't hold all that's measured, is said, exit 2.
+
+The tree never has what's typed in a field (an entry's, a text area's),
+but the pictures are screenshots, as `shoot`'s are, and show it: keep a
+saved run where you would a screenshot of the same window. A rich
+editor's text (a contenteditable's) is its nodes' names, as in any
+tree `a11y tree` reads, so it's in `tree.json` too.
+
+GTK 4 4.14 and later's text is found where it's drawn by drawing its
+name in its font ([below](#gtk-4s-positions)), which needs the
+program's fonts and GTK's layout, so from a file each node of a GTK 4
+window that would be measured, on any release, is a note: `PATH: text
+not measured from a file: GTK 4 is measured live only` (or `graphics`,
+or `edge`). What's behind
+a modal dialog is said as it was live.
 
 ### GTK 4's positions
 

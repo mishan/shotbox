@@ -21,6 +21,14 @@
   window it picks, as well as one that stopped as it was read.
 - `a11y lint` takes a role by libatspi's name for it, as a saved tree
   has it, so on an older libatspi it also finds an unnamed switch.
+- `a11y contrast --save DIR` writes the tree and pictures it measured, and
+  `a11y contrast --from DIR` measures them again with no session, display
+  or PyGObject: the same lines, JSON and exit status as the live run. The
+  pictures are screenshots, and can show what's typed in a field; the
+  tree never has an entry's or text area's text. From a file, GTK 4's
+  are notes, measured live only.
+- `a11y contrast` takes a role by libatspi's name for it too, so on an
+  older libatspi a toolkit's own switch is left out as a switch is.
 
 ### Fixed
 
