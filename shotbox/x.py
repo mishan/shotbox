@@ -828,7 +828,7 @@ def kept_png(path, size=None):
         return None
     # The size again from what's decoded, which the file can have changed
     # under since it was asked.
-    data = subprocess.run([*CONVERT, path, "-alpha", "off", "-depth", "8", "ppm:-"],
+    data = subprocess.run([*CONVERT, path, "-alpha", "off", "-depth", "8", "+set", "comment", "ppm:-"],
                           capture_output=True)
     try:
         got = ppm(data.stdout) if not data.returncode else None

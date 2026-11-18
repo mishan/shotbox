@@ -173,13 +173,14 @@ CONVERT = ["magick"] if subprocess.run(["sh", "-c", "command -v magick"],
                                        capture_output=True).returncode == 0 else ["convert"]
 
 
-def kept(frames, seconds=2.0, taken=None, manifest=None, size=(W, H)):
-    """A directory holding `frames`, (at, rgb), and a frames.json saying
-    them, or `manifest` in its place."""
+def kept(frames, seconds=2.0, taken=None, manifest=None, size=(W, H), more=()):
+    """A directory holding `frames`, (at, rgb), each PNG written with
+    ImageMagick's `more` options, and a frames.json saying them, or
+    `manifest` in its place."""
     d = Path(tempfile.mkdtemp(dir=tmp))
     for n, (_, rgb) in enumerate(frames, 1):
         subprocess.run([*CONVERT, "-size", f"{size[0]}x{size[1]}", "-depth", "8", "rgb:-",
-                        str(d / f"f{n}.png")], input=rgb, check=True)
+                        *more, str(d / f"f{n}.png")], input=rgb, check=True)
     (d / "frames.json").write_text(manifest if manifest is not None else json.dumps(
         {"version": 1, "seconds": seconds, "taken": len(frames) if taken is None else taken,
          "size": list(size), "frames": [{"file": f"f{n}.png", "at": at}
@@ -205,6 +206,9 @@ st, out, err = cli(kept(STRIP, taken=600))
 check((st, out, err) == (1, ["flicker: 16x16+16+0, 59 changes, every 30 ms, #000000 and #009900, "
                               "from 0.030s", "watched 2 s, 600 pictures, 300 a second, 60 changed"],
                          ""), f"flicker --from: a kept strip flickering ({st}, {out}, {err!r})")
+st, out, err = cli(kept(STRIP, taken=600, more=["-set", "comment", "kept"]))
+check(st == 1 and out[0].startswith("flicker: 16x16+16+0, 59 changes"),
+      f"flicker --from: PNGs with a comment in them ({st}, {out}, {err!r})")
 st, out, err = cli(kept(flips([0.5] * 4), taken=4))
 check(st == 0 and out == ["watched 2 s, 4 pictures, 2 a second, 4 changed"]
       and "fewer than two to 100 ms" in err and "too few to hold 8 changes" in err,
