@@ -2395,9 +2395,8 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
         return False
 
     def hovered(box):
-        """The screen with the pointer over the middle of `box`, once the
-        sampler's done, whose pictures it would change."""
-        sampler.join()
+        """The screen with the pointer over the middle of `box`: only once
+        the sampler's done, whose pictures it would change."""
         s = Screen()
         try:
             s.move(box[0] + box[2] // 2, box[1] + box[3] // 2)
@@ -2453,6 +2452,7 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
             n["_runs"] = runs(n)
     measured = [r for n in nodes if kind(n) for r in n.get("_runs", [n])]
     problems, passes, notes, behind, whys, count, taken = [], [], [], [], [], 0, []
+    unseen_controls, failed = [], []   # the problems whose lines need more read live
     uncounted = set()   # what's measured only by its pictures, if at all
     trusted = os.environ.get("SHOTBOX_TRUST_GTK4_BOUNDS") == "1"
     rel = {}
@@ -2852,7 +2852,7 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
         return not any(o.path.startswith(n.path + "/") for o in measured)
 
     pic = picture.Picture(*screen.backend.pixels(screen.env))
-    shot, samples, stop = time.monotonic(), [], threading.Event()
+    shot, shots, stop = time.monotonic(), [], threading.Event()
 
     def searched(n):
         """Whether `n`'s text is looked for where it's drawn: GTK 4's, from
@@ -2898,7 +2898,7 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
                 return
             got = screen.backend.grab(screen.env, box=(x1 - x0, y1 - y0, x0, y0))
             p = picture.Picture(*(got or screen.backend.pixels(screen.env)))
-            samples.append({r: crops_of(p, r, *((x0, y0) if got else (0, 0))) for r in rs})
+            shots.append((p, *((x0, y0) if got else (0, 0))))
     # Pictured again at set times while it's measured, so when a blink is
     # caught doesn't hang on how long measuring takes.
     sampler = threading.Thread(target=sample, daemon=True)
@@ -3329,13 +3329,9 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
                 notes.append((n, f"{k} not measured: partly outside the screen"))
                 continue
             back = picture.hex_of(pic.colors(box).most_common(1)[0][0])
-            # A control can be drawn only when the pointer's over it: a tab's
-            # close button. Say how it is then, to tell.
-            over = n.role in controls and picture.text_contrast(hovered(box), box)
-            then = (f"; with the pointer over it, {ratio_text(over[0])}:1, "
-                    f"{picture.hex_of(over[1])} on {picture.hex_of(over[2])} ({at})"
-                    if over else "")
-            problems.append((n, f"{k} not seen: nothing drawn on {back}{then}"))
+            problems.append((n, f"{k} not seen: nothing drawn on {back}"))
+            if n.role in controls:
+                unseen_controls.append((len(problems) - 1, box, at))
             uncounted.add(id(n))
             taken.append((n, k, least, at, box, None, ""))
         elif got:
@@ -3364,16 +3360,55 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
                 passes.append((n, f"{k} passes at {ratio_text(got[0])}:1, {colors}{moved}"))
                 taken.append((n, k, least, at, box, seen and seen[2], moved))
                 continue
-            said = said_color(Atspi, n)
-            # Light or small text covers no pixel whole, so measures short of
-            # its color, as text drawn see-through does: say both.
-            meant = (f"; drawn lighter than its color, {picture.hex_of(said)}, which is "
-                     f"{ratio_text(picture.ratio(said, got[2]))}:1 (light text, or opacity)"
-                     if said and picture.ratio(said, got[2]) > got[0]
-                     and picture.between(got[1], got[2], said) else "")
-            problems.append((n, (f"{k} {ratio_text(got[0])}:1{' at best' if twice else ''}, "
-                                 f"{colors}{meant}{moved}")))
+            head = f"{k} {ratio_text(got[0])}:1{' at best' if twice else ''}, {colors}"
+            problems.append((n, head + moved))
+            failed.append((len(problems) - 1, got, head, moved))
             taken.append((n, k, least, at, box, seen and seen[2], moved))
+    # What's read live of what was measured, now the sampler's done, as
+    # hovered() needs: how a control not seen is with the pointer over it,
+    # the color GTK 3 says failing text is, and whether what changed in a
+    # sample has moved.
+    if not taken:
+        stop.set()
+    sampler.join()
+    rs = set(regions.values())
+    samples = [{r: crops_of(p, r, x0, y0) for r in rs} for p, x0, y0 in shots]
+    for i, box, at in unseen_controls:
+        # A control can be drawn only when the pointer's over it: a tab's
+        # close button. Say how it is then, to tell.
+        over = picture.text_contrast(picture.Picture(box[2], box[3], crops_of(
+            hovered(box), (box[0], box[1], box[0] + box[2], box[1] + box[3]))), [0, 0, *box[2:]])
+        if over:
+            problems[i] = (problems[i][0], problems[i][1] + (
+                f"; with the pointer over it, {ratio_text(over[0])}:1, "
+                f"{picture.hex_of(over[1])} on {picture.hex_of(over[2])} ({at})"))
+    for i, _, _, _ in failed:
+        said = said_color(Atspi, problems[i][0])
+        if said:
+            problems[i][0]["_color"] = said
+    where = None
+    for n, *_ in taken:
+        region = regions.get(id(n))
+        if region and any(s[region] != crops_of(pic, region) for s in samples):
+            where = where or (Screen(), {})
+            try:
+                still = place(Atspi, n, where[0].backend.windows(where[0].env),
+                              where[1]) == parents.get(n.path, n).bounds
+            except Exception:   # gone since
+                still = False
+            if not still:
+                parents.get(n.path, n)["_moved"] = True
+    if where:
+        where[0].close()
+    for i, got, head, moved in failed:
+        said = problems[i][0].get("_color")
+        # Light or small text covers no pixel whole, so measures short of
+        # its color, as text drawn see-through does: say both.
+        if said and picture.ratio(said, got[2]) > got[0] and picture.between(got[1], got[2], said):
+            problems[i] = (problems[i][0], f"{head}; drawn lighter than its color, "
+                           f"{picture.hex_of(said)}, which is "
+                           f"{ratio_text(picture.ratio(said, got[2]))}:1 (light text, or opacity)"
+                           f"{moved}")
     # Text that fades or blinks measures as it is the moment it's pictured.
     # What changed in a sample is measured in each, its sample's part laid
     # over the first picture: GTK 4's text not found (`drawn` False) looked
@@ -3384,17 +3419,14 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
     # end of a fade can be meant, and the bright end be all it is for a
     # moment, so it's said with its range, failing only with `strict`. A
     # change of less than CHANGE is a level's flicker, none.
-    if not taken:
-        stop.set()
-    sampler.join()
-    first, where = pic, None
+    first = pic
     for n, k, least, at, box, drawn, rest in taken:
         region = regions.get(id(n))
         base = region and crops_of(first, region)
         if not region or all(s[region] == base for s in samples):
             continue
         x0, y0, wide, high = region[0], region[1], region[2] - region[0], region[3] - region[1]
-        got, still = [], None
+        got = []
         try:
             for rows in [base, *(s[region] for s in samples)]:
                 if drawn is False:
@@ -3425,22 +3457,11 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
                     r = picture.text_contrast(
                         picture.Picture(wide, high, rows), [box[0] - x0, box[1] - y0, *box[2:]],
                         drawn and (drawn[0] - x0, drawn[1] - y0, drawn[2]))
-                if not r:
-                    if still is None:
-                        where = where or (Screen(), {})
-                        try:
-                            still = place(Atspi, n, where[0].backend.windows(where[0].env),
-                                          where[1]) == parents.get(n.path, n).bounds
-                        except Exception:   # gone since
-                            still = False
-                    if not still:
-                        continue
+                if not r and parents.get(n.path, n).get("_moved"):
+                    continue
                 got.append(r or (1.0, None))
         finally:
             pic = first
-            if where:
-                where[0].close()
-                where = None
         got.sort(key=lambda r: r[0])
         if not got or got[-1][0] - got[0][0] < CHANGE:
             continue
