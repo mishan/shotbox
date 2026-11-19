@@ -146,13 +146,21 @@ elif sys.argv[2:] == ["alert"]:
         box.add(widget)
     w.add(box)
 elif sys.argv[2:3] and sys.argv[2] in patterns.PATTERNS:
-    # flicker's patterns, drawn by the time since the window was made.
-    area, began = Gtk.DrawingArea(), GLib.get_monotonic_time()
+    # flicker's patterns, as they are at each tick from when the window was
+    # made, as test/flicker_test.py draws them: a timer, or a draw, late
+    # draws that tick late rather than skipping it, and the next is set
+    # for its own time, so GLib's timers don't drift.
+    area, began, at = Gtk.DrawingArea(), GLib.get_monotonic_time(), [0]
     tick, paint = patterns.PATTERNS[sys.argv[2]](sys.argv[3:])
-    area.connect("draw", lambda a, cr: paint(cr, (GLib.get_monotonic_time() - began) // 1000))
-    # Drawn every 10 ms at least: GLib's timers drift, and one that fires
-    # either side of a brief look would never show it.
-    GLib.timeout_add(min(tick, 10), lambda: area.queue_draw() or True)
+    area.connect("draw", lambda a, cr: paint(cr, at[0]))
+
+    def step():
+        at[0] += tick
+        area.queue_draw()
+        late = (GLib.get_monotonic_time() - began) // 1000 - at[0]
+        GLib.timeout_add(max(1, tick - late), step)
+        return False
+    GLib.timeout_add(tick, step)
     w.add(area)
 elif sys.argv[2:3] == ["slow"]:
     late = int(sys.argv[3])

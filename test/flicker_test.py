@@ -184,9 +184,16 @@ def render(name, args=(), start=7, seconds=1.6):
         surface = cairo.ImageSurface(cairo.FORMAT_RGB24, patterns.W, patterns.H)
         draw(cairo.Context(surface), ms)
         surface.flush()
-        bgrx, rgb = bytes(surface.get_data()), bytearray(patterns.W * patterns.H * 3)
-        rgb[0::3], rgb[1::3], rgb[2::3] = bgrx[2::4], bgrx[1::4], bgrx[0::4]
-        yield (ms - start) / 1000, bytes(rgb)
+        yield (ms - start) / 1000, rgb_of(surface)
+
+
+def rgb_of(surface):
+    """A cairo RGB24 surface's pixels as RGB: each a native 32-bit word,
+    xRGB, so its bytes are B, G, R, x on a little-endian machine."""
+    data, rgb = bytes(surface.get_data()), bytearray(surface.get_width() * surface.get_height() * 3)
+    r, g, b = (2, 1, 0) if sys.byteorder == "little" else (1, 2, 3)
+    rgb[0::3], rgb[1::3], rgb[2::3] = data[r::4], data[g::4], data[b::4]
+    return bytes(rgb)
 
 
 def hex_of(r, g, b):
@@ -196,7 +203,7 @@ def hex_of(r, g, b):
     cr.set_source_rgb(r, g, b)
     cr.paint()
     surface.flush()
-    return "#" + bytes(surface.get_data())[2::-1].hex()
+    return "#" + rgb_of(surface).hex()
 
 
 def gray_looks(looks):

@@ -987,6 +987,7 @@ done
 # border above and below each. And --from what --frames kept says what
 # the live watch did, outside the session.
 sheets() {
+  [ -d "$1" ] || return 1
   echo "$2" | sed -n 's/^\(fl[a-z]*\): \([^,]*\),.*, shown in \(.*\)/\1 \2 \3/p' > "$tmp/sheets"
   [ "$(ls "$1" | wc -l)" = "$(wc -l < "$tmp/sheets")" ] || return 1
   while read -r kind box sheet; do
