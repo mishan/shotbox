@@ -2669,8 +2669,11 @@ print(\"{2}x{3}+{0}+{1}\".format(*next(n for n in json.load(sys.stdin) if n[\"na
     && ok "a11y: wait match and change --ignore-node, a clock left out; wait match --click, where it matched" \
     || { fail "a11y: wait --ignore-node and --click"; cat "$tmp/clk-out" "$tmp/clk.log" "$tmp/clk-err"; }
   # wait node --state, --value and --count, and wait gone, on a window
-  # loading for a second; each giving up says what it saw.
-  "$sb" run --a11y -- sh -c "'$here/window.py' ld loading & '$sb' wait window ld >/dev/null &&
+  # loading for a second; each giving up says what it saw. The window's
+  # pid and when its wait began are kept with what's said, so one that
+  # doesn't answer can be told from another.
+  "$sb" run --a11y -- sh -c "'$here/window.py' ld loading & echo \"ld is pid \$!\"
+    '$sb' wait window ld >/dev/null && echo \"\$(date +%T.%3N) waiting for Loading to go\" &&
     '$sb' wait gone Loading --window ld --timeout 5 && '$sb' wait node '^Save\$' --state enabled --timeout 5 && '$sb' wait node Remember --state checked --timeout 5 &&
     '$sb' wait node Progress --value 100 --timeout 5 && '$sb' wait node '^Row [0-9]\$' --count 5 --timeout 5 > '$tmp/ld-rows' &&
     { '$here/window.py' bye & p=\$!; '$sb' wait window bye >/dev/null; { sleep 1; kill \$p; } &
