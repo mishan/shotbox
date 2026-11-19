@@ -1447,6 +1447,31 @@ print([(n['role'], k, n[k]) for n in json.load(open(sys.argv[1])) for k in ('dra
     '$sb' a11y click Corner --window corner >/dev/null && sleep 0.5" \
     && [ "$(cat "$tmp/corner" 2>/dev/null)" = clicked ] \
     && ok "a11y: click finds a GTK 3 button in its window's corner" || fail "a11y: click, GTK 3 corner"
+  # Each contrast run from here to GTK 4's last is saved, then measured
+  # again from what it saved, with no session, AT-SPI or PyGObject: as
+  # the live run, GTK 4's too, from what its search read and drew.
+  mkdir -p "$tmp/replayed/gi"
+  echo "raise ImportError('PyGObject blocked')" > "$tmp/replayed/gi/__init__.py"
+  { echo "sb='$sb' log='$tmp/replayed'"; cat <<'EOF'
+case "$1 $2" in "a11y contrast") ;; *) exec "$sb" "$@" ;; esac
+for a; do case $a in --save|--from) exec "$sb" "$@" ;; esac; done
+d=$(mktemp -d "$log/run.XXXXXX")
+"$sb" "$@" --save "$d/saved" > "$d/out" 2> "$d/err"; st=$?
+# The same options, but those --from takes none of.
+shift 2; n=$# skip=
+for a; do
+  if [ -n "$skip" ]; then skip=; else case $a in --window|--timeout) skip=1 ;; *) set -- "$@" "$a" ;; esac; fi
+done
+shift $n
+env -u DISPLAY -u WAYLAND_DISPLAY -u AT_SPI_BUS_ADDRESS PYTHONPATH="$log" \
+  "$sb" a11y contrast "$@" --from "$d/saved" > "$d/fout" 2> "$d/ferr"
+[ $? = $st ] && cmp -s "$d/out" "$d/fout" && cmp -s "$d/err" "$d/ferr" \
+  && echo "same $d" >> "$log/said" || echo "differs $d" >> "$log/said"
+cat "$d/out"; cat "$d/err" >&2; exit $st
+EOF
+  } > "$tmp/replayed/sb"
+  chmod +x "$tmp/replayed/sb"
+  live_sb=$sb sb=$tmp/replayed/sb
   # GTK 4 says where its widgets are wrong: their text is measured where
   # it's found drawn near there, at its colors, and what isn't found (a
   # label over two lines, labels drawn letter-spaced or in upper case
@@ -1589,13 +1614,34 @@ EOF
       || { fail "a11y: contrast --from, against live ($win: $st, $(cat "$d.st" 2>/dev/null))"
            { diff "$d.out" "$d.from"; diff "$d.err" "$d.ferr"; } || true; }
   done
-  "$sb" run --a11y -- sh -c "'$app' faint & '$sb' wait window a11y-test >/dev/null
-    '$sb' a11y contrast --window a11y-test --save '$tmp/replay4k'" >/dev/null 2>&1 || true
-  set +e; "$sb" a11y contrast --from "$tmp/replay4k" > "$tmp/replay4k.from" 2>&1; st=$?; set -e
-  [ $st = 2 ] && grep -q 'label\[7\]: text not measured from a file: GTK 4 is measured live only$' "$tmp/replay4k.from" \
-    && ! grep -v 'not measured from a file: GTK 4 is measured live only$\|^shotbox: nothing measured' "$tmp/replay4k.from" \
-    && ok "a11y: contrast --from: GTK 4's, each a note" \
-    || { fail "a11y: contrast --from, GTK 4 ($st)"; cat "$tmp/replay4k.from"; }
+  # What's typed in a field, which GTK 4's search reads to tell text
+  # apart, and what tells it, are kept in fields.json alone. From 4.14.6,
+  # where a label's text can be takes in the entry under it, its text is
+  # read; before, only its place.
+  "$sb" run --a11y -- sh -c "'$app' twin & '$sb' wait window a11y-test >/dev/null
+    '$sb' a11y contrast --window a11y-test --save '$tmp/saved-field'" >/dev/null 2>&1 || true
+  set +e
+  python3 - "$tmp/saved-field" <<'PY'
+import json, re, sys
+d = sys.argv[1]
+tree = json.load(open(d + "/tree.json"))
+fields = {n["path"] for n in tree if "editable" in n["states"]}
+g, s, f = (json.load(open(f"{d}/{name}.json")) for name in ("gtk4", "shapes", "fields"))
+typed = {t for p in fields for t in f["reads"]["texts"].get(p, [])}
+assert fields and any(p in fields for r in f["reads"].values() for p in r), f
+assert not any(p in fields for r in g["reads"].values() for p in r), g
+assert not any(x["text"] in typed for x in s["shapes"]), [x["text"] for x in s["shapes"]]
+if tuple(map(int, re.findall(r"\d+", tree[0]["toolkit"]))) < (4, 14, 6):
+    sys.exit(3)
+assert "Twin" in typed and any(x["text"] == "Twin" for x in f["shapes"]), f
+PY
+  st=$?; set -e
+  case $st in
+    0) ok "a11y: contrast --save keeps what's typed in a field, and what tells it, only in fields.json" ;;
+    3) ok "a11y: contrast --save keeps a field's reads only in fields.json"
+       echo "skip  a11y: contrast --save, what's typed in a field: GTK 4 before 4.14.6 doesn't read it" ;;
+    *) fail "a11y: contrast --save, what's typed in a field" ;;
+  esac
   # A faint label dark half a second in two is changing, whenever the
   # first picture's taken, and with --strict fails; dark words sliding by
   # pass, though they've moved out of where they were first seen.
@@ -2034,6 +2080,16 @@ sys.exit(bool(bad))
 PY
   else
     echo "skip  a11y: contrast, GTK 4 graphics placed by text found near them: GTK 4.$minor.$micro, before 4.14.6"
+  fi
+  sb=$live_sb
+  same=$(grep -c '^same ' "$tmp/replayed/said" 2>/dev/null || true)
+  if [ "${same:-0}" -gt 0 ] && ! grep -q '^differs ' "$tmp/replayed/said"; then
+    ok "a11y: contrast --from says what each of $same live runs that saved it did, GTK 4's measured from what was read"
+  else
+    fail "a11y: contrast --from, against each live run"
+    for d in $(sed -n 's/^differs //p' "$tmp/replayed/said" 2>/dev/null); do
+      { diff "$d/out" "$d/fout"; diff "$d/err" "$d/ferr"; } || true
+    done
   fi
   # A program that doesn't answer, stopped: each command that reads the
   # tree says so, by 1 s past its timeout, from the command line and

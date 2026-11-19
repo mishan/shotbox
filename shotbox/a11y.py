@@ -16,6 +16,7 @@ desktop's. `record` is the session's announcement recorder; `node` and
 """
 
 import argparse
+import base64
 import collections
 import difflib
 import json
@@ -2184,8 +2185,11 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
     a line each; how many were measured). A web page with text, none of it
     measured, is a note. With `keep`, a dict, what it measured is put in
     it, for save_contrast(); with `kept`, saved_contrast()'s, that's
-    measured, with nothing read live, and GTK 4's are notes."""
+    measured, with nothing read live: GTK 4's from what its search read and
+    drew live, and notes where the run was saved without it."""
     skip = ignored(ignore, web=filed if kept else True)
+    # What GTK 4's search read and drew live, from a run saved with it.
+    g4 = kept.get("gtk4") if kept else None
     if kept:
         Atspi, nodes = None, kept["nodes"]
     else:
@@ -2207,7 +2211,16 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
     unworded = (controls - {"link"}) | images
     parents = {n.path: n for n in nodes}
     ids = {n.get("_id"): n for n in nodes}
-    layers = {}
+    # What GTK 4's text search reads of the tree live, each by its node's
+    # path, as it's asked for.
+    reads = g4["reads"] if g4 else {k: {} for k in GTK4_READS}
+
+    def unsaved(kind, path=None):
+        """From a file, a read or shape the live run didn't make: only if
+        this run looks further than it did."""
+        what = f"{path}'s {kind}" if path else kind
+        raise SessionError(f"{kept['dir']}: the saved run didn't read {what}, which this needs: "
+                           "save it again, with these options")
 
     def within(path, outer):
         return path == outer or path.startswith(outer + "/")
@@ -2383,27 +2396,35 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
                 break
         else:
             return False
-        try:
-            e = n._acc.get_extents(Atspi.CoordType.WINDOW)
-            got = n._top.get_accessible_at_point(e.x + e.width // 2, e.y + e.height // 2,
-                                                 Atspi.CoordType.WINDOW)
-        except Exception:   # gone since the walk
-            return False
-        o = got and ids.get(f"{got.app.bus_name if got.app else ''}{got.path}")
+        if n.path not in reads["paged"]:
+            if kept:
+                unsaved("node at its middle", n.path)
+            try:
+                e = n._acc.get_extents(Atspi.CoordType.WINDOW)
+                got = n._top.get_accessible_at_point(e.x + e.width // 2, e.y + e.height // 2,
+                                                     Atspi.CoordType.WINDOW)
+                o = got and ids.get(f"{got.app.bus_name if got.app else ''}{got.path}")
+                reads["paged"][n.path] = o.path if o else None
+            except Exception:   # gone since the walk
+                reads["paged"][n.path] = None
+        o = parents.get(reads["paged"][n.path])
         stack = page.rsplit("/", 1)[0]
         return bool(o) and not within(o.path, page) and (
             within(o.path, stack) or within(stack, o.path))
 
     def popped(n):
         """Whether `n` is in a popover, or is one."""
-        path = n.path
+        path, popups = n.path, reads["popups"]
         while "/" in path:
-            if path not in layers:
+            # A window's title can hold a "/": a path that's no node's.
+            if path in parents and path not in popups:
+                if kept:
+                    unsaved("layer", path)
                 try:
-                    layers[path] = parents[path]._acc.get_layer() == Atspi.ComponentLayer.POPUP
+                    popups[path] = parents[path]._acc.get_layer() == Atspi.ComponentLayer.POPUP
                 except Exception:   # no bounds: a stack's page
-                    layers[path] = False
-            if layers[path]:
+                    popups[path] = False
+            if popups.get(path):
                 return True
             path = path.rsplit("/", 1)[0]
         return False
@@ -2469,12 +2490,13 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
     problems, passes, notes, behind, whys, count, taken = [], [], [], [], [], 0, []
     unseen_controls, failed = [], []   # the problems whose lines need more read live
     uncounted = set()   # what's measured only by its pictures, if at all
-    trusted = os.environ.get("SHOTBOX_TRUST_GTK4_BOUNDS") == "1"
-    rel = {}
-
+    trusted = g4["trusted"] if g4 else os.environ.get("SHOTBOX_TRUST_GTK4_BOUNDS") == "1"
     def relative(n):
         """`n`'s extents in its parent's, as GTK says them."""
+        rel = reads["relative"]
         if n.path not in rel:
+            if kept:
+                unsaved("extents in its parent", n.path)
             try:
                 e = n._acc.get_extents(Atspi.CoordType.PARENT)
                 rel[n.path] = (e.x, e.y, e.width, e.height)
@@ -2482,7 +2504,19 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
                 rel[n.path] = None
         return rel[n.path]
 
-    areas, fonts, drawings, lays, refused, aparts, doubt, both = {}, {}, {}, {}, {}, {}, {}, {}
+    def lone_child(up):
+        """Whether `up` has one child and no actions, as a stack's page."""
+        if up.path not in reads["pages"]:
+            if kept:
+                unsaved("children and actions", up.path)
+            reads["pages"][up.path] = (up._acc.get_child_count() == 1
+                                       and "Action" not in up._acc.get_interfaces())
+        return reads["pages"][up.path]
+
+    areas, refused, aparts, doubt, both = {}, {}, {}, {}, {}
+    # Each shape drawn, the same object each time it's asked for: aparts
+    # is keyed by its id.
+    drawings = g4["drawings"] if g4 else {}
     groups, anchors, votes, sought = {}, {}, {}, set()
 
     def spare(up, child, sizes=True):
@@ -2497,8 +2531,7 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
         # A page: not a widget, so no actions, with its child's extents.
         # Its child is placed from it, counted twice, unless GTK sums
         # past the page, as for libadwaita 1.5's view stack.
-        if (mine == its and up._acc.get_child_count() == 1
-                and "Action" not in up._acc.get_interfaces() and child.bounds and up.bounds
+        if (mine == its and lone_child(up) and child.bounds and up.bounds
                 and child.bounds[:2] == [up.bounds[0] + its[0], up.bounds[1] + its[1]]):
             return "page"
         if not sizes:
@@ -2553,7 +2586,10 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
         return bool(area) and not all(area[2:])
 
     def font(n):
+        fonts = reads["fonts"]
         if n.path not in fonts:
+            if kept:
+                unsaved("font", n.path)
             try:
                 attrs, _, end = Atspi.Text.get_attribute_run(n._acc, 0, True)
                 # Where that run ends, for text_shapes to underline only it:
@@ -2565,6 +2601,8 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
 
     def drawing(text, attrs, dy=0):
         key = (text, tuple(sorted(attrs.items())), dy)
+        if key not in drawings and kept:
+            unsaved("a text's shape")
         if key not in drawings:
             drawings[key] = text_shapes(text, attrs, dy)
         return drawings[key]
@@ -2573,6 +2611,10 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
         """What `o` may draw: its name, unless it's a label's it's named by,
         and what's in it, if it's edited or a label, whose name can be set
         to other than what it draws."""
+        if o.path in reads["texts"]:
+            return reads["texts"][o.path]
+        if kept:
+            unsaved("texts", o.path)
         got = []
         if o.name and not any(t.get_name() == o.name
                               for t in related(Atspi, o._acc, "LABELLED_BY")):
@@ -2586,7 +2628,8 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
             got.append((o._acc.get_attributes() or {}).get("placeholder-text", ""))
         except Exception:   # gone since the walk
             pass
-        return list(dict.fromkeys(t for t in got if t))
+        reads["texts"][o.path] = list(dict.fromkeys(t for t in got if t))
+        return reads["texts"][o.path]
 
     def as_wide(n, shape):
         """Whether the text GTK lays out for `n` is as wide as its name drawn
@@ -2619,7 +2662,10 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
         """Where GTK lays out `n`'s text in its own box, (x, y, width), from
         4.14.6 (before, it doesn't say); or None, as for one character
         from 4.22.3, whose range is empty, at the box's corner."""
+        lays = reads["laid"]
         if n.path not in lays:
+            if kept:
+                unsaved("text layout", n.path)
             lays[n.path] = None
             if gtk4_release(n) >= (4, 14, 6):
                 try:
@@ -2754,7 +2800,7 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
             if not there or not all(overlap(there, box)[2:]):
                 continue
             for t in texts_of(o):
-                if time.monotonic() > until:
+                if until.past():
                     raise TimeoutError
                 other = drawing(t, font(o) or attrs)
                 # A shorter text inside this one can't match all of it, if
@@ -2886,8 +2932,9 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
     regions = {}
     for n in measured:
         region = pic.clip(((searched(n) or placeable(n)) and room(n)) or shown(n) or [0, 0, 0, 0])
-        # GTK 4's, measured live only, were cut to where they can be.
-        if region and not (kept and kit4(n)):
+        # GTK 4's from a run saved without what its search reads are
+        # measured live only, so a sample needn't hold them.
+        if region and not (kept and not g4 and kit4(n)):
             regions[id(n)] = region
 
     def crops_of(p, r, x=0, y=0):
@@ -2930,10 +2977,10 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
             n["_drawn"] = False
     found, late, hidden = {}, set(), set()
     cannot = None
-    until = time.monotonic() + SEARCH
+    until = picture.Deadline(gone=g4["gone"]) if g4 else picture.Deadline(SEARCH)
     for n in measured:
         if searched(n) and leaf(n) and n.path not in fronts:
-            cannot = cannot or pango_cairo()
+            cannot = cannot or (g4["cannot"] if g4 else pango_cairo())
             if not cannot and out_of_view(n):
                 hidden.add(n.path)
             if cannot or n.path in hidden or unsure(n) or lone(n):
@@ -3084,7 +3131,7 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
         boxes = {(dx, dy): [b[0] + dx, b[1] + dy, *b[2:]] for dx in xs for dy in ys}
         got = set()
         for d, o in boxes.items():
-            if time.monotonic() > until:
+            if until.past():
                 return f"not looked for, past the {SEARCH:g} seconds given to looking"
             if picture.drawn_at(pic, o):
                 got.add(d)
@@ -3173,11 +3220,12 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
     def live_only(n, k):
         """Whether `n`, read from a file, is GTK 4's, whose text is looked
         for where it's drawn, live only: noted if so."""
-        if not kept or not kit4(n):
+        if not kept or g4 or not kit4(n):
             return False
         notes.append((n, f"{k} not measured from a file: GTK 4 is measured live only"))
         n["_why"] = why = ("GTK 4 reports where its widgets are wrong, so contrast finds them "
-                           "where they're drawn, which it does only live; see "
+                           "where they're drawn, from what it reads and draws live, which a run "
+                           "saved without gtk4.json doesn't have: save it again; see "
                            "docs/accessibility.md.")
         if why not in whys:
             whys.append(why)
@@ -3307,7 +3355,7 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
             if not seen:
                 refused[n.path] = doubt[n.path]
         # Only in a window raised: another can be over it, its text faint.
-        dim = (window and n.path in found and not seen
+        dim = ((g4["raised"] if g4 else window) and n.path in found and not seen
                and refused.get(n.path, ("",))[0] != "twin" and faint(n, least))
         if dim:
             uncounted.add(id(n))
@@ -3589,6 +3637,9 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
                 whys.append(why)
     if keep is not None:
         keep.update(nodes=nodes, first=first, shots=shots, hovers=hovers)
+        if any(nodes[n._win] is n and kit4(n) for n in nodes):
+            keep["gtk4"] = {"reads": reads, "drawings": drawings, "gone": until.gone,
+                            "trusted": trusted, "cannot": cannot, "raised": bool(window)}
     notes = [(n, what) for n, what in notes if not skip(n, what)]
     # What's scrolled out of view isn't there to measure, as GTK 3's and
     # browsers' rows aren't, which aren't said at all.
@@ -3752,10 +3803,11 @@ def made_with(top):
 
 def gtk4(n):
     """The GTK 4 version `n`'s program is, or None. Asked once a program:
-    get_application() asks its way up the tree. None for a node read from
-    a file, which contrast measures only where it isn't GTK 4's."""
+    get_application() asks its way up the tree. For a node read from a
+    file, as saved_contrast() says it: None for a run saved without what
+    GTK 4's search reads, measured only where it isn't GTK 4's."""
     if "_acc" not in n:
-        return None
+        return n.get("_gtk4")
     bus = n._acc.app.bus_name if n._acc.app else None
     if bus not in GTK4:
         app = n._acc.get_application()
@@ -3765,6 +3817,8 @@ def gtk4(n):
 
 
 GTK4 = {}
+# The reads of the tree GTK 4's text search makes, as gtk4.json keeps them.
+GTK4_READS = ("relative", "pages", "fonts", "laid", "paged", "popups", "texts")
 
 
 def gtk4_release(n):
@@ -3876,7 +3930,9 @@ def save_contrast(out, kept, unchecked):
     it isn't the default (but never what's typed in a field), and
     pictures.json, which names the PNGs: the first picture of the screen,
     each sample and where it's from, and each control not seen with the
-    pointer over it, only its box. With `unchecked`, the live run is not
+    pointer over it, only its box. For a GTK 4 window, gtk4.json and
+    shapes.json, what its text search read and drew, and fields.json, all
+    of that which is of a field. With `unchecked`, the live run is not
     all checked, and so is the saved one."""
     out = Path(out)
     try:
@@ -3922,6 +3978,25 @@ def save_contrast(out, kept, unchecked):
             tree += [{"role": "application", "name": "", "description": "", "states": [],
                       "path": "application", "depth": 0, "pid": pid, "quiet": True,
                       "bounds": None} for pid in sorted(QUIET)]
+        g = kept.get("gtk4")
+        if g:
+            # What's typed in a field, and what tells it (its font's run,
+            # the shapes it's drawn as), only in fields.json.
+            fields = {n.path for n in nodes if "editable" in n.states}
+            typed = {t for p in fields for t in g["reads"]["texts"].get(p, ())}
+            mine = [{k: {p: v for p, v in got.items() if (p in fields) == typed_}
+                     for k, got in g["reads"].items()} for typed_ in (False, True)]
+            shapes = [[{"text": t, "attrs": dict(attrs), "dy": dy, "kinds": kinds and [
+                [[w, h, base64.b64encode(c).decode()] for w, h, c in kind] for kind in kinds]}
+                       for (t, attrs, dy), kinds in g["drawings"].items() if (t in typed) == typed_]
+                      for typed_ in (False, True)]
+            (out / "gtk4.json").write_text(json.dumps(
+                {"version": 1, **{k: g[k] for k in ("trusted", "cannot", "raised", "gone")},
+                 "reads": mine[0]}))
+            (out / "shapes.json").write_text(json.dumps({"version": 1, "shapes": shapes[0]}))
+            if any(mine[1].values()) or shapes[1]:
+                (out / "fields.json").write_text(json.dumps(
+                    {"version": 1, "reads": mine[1], "shapes": shapes[1]}))
         (out / "tree.json").write_text(json.dumps(tree))
         names = {"version": 1, "screen": png("picture.png", kept["first"]),
                  "samples": [{"file": png(f"sample-{i}.png", p), "x": x0, "y": y0}
@@ -3931,6 +4006,92 @@ def save_contrast(out, kept, unchecked):
         (out / "pictures.json").write_text(json.dumps(names))
     except (OSError, subprocess.CalledProcessError) as e:
         raise SessionError(f"can't save to {out}: {getattr(e, 'strerror', None) or e}") from None
+
+
+def saved_gtk4(d, paths):
+    """What GTK 4's search read and drew of the run saved in `d`, whose
+    nodes are at `paths`, as contrast(kept=) takes it under "gtk4", or
+    None for a run saved without gtk4.json."""
+    def load(name, need=True):
+        try:
+            with open(d / name) as f:
+                got = json.load(f)
+        except FileNotFoundError:
+            if need:
+                raise SessionError(f"can't read {d / name}: no such file") from None
+            return None
+        except OSError as e:
+            raise SessionError(f"can't read {d / name}: {e.strerror}") from None
+        except ValueError:
+            got = None
+        if got is None:
+            raise SessionError(f"{d / name} isn't what contrast --save writes")
+        return got
+
+    def ints(v, n):
+        return isinstance(v, list) and len(v) == n and all(type(i) is int for i in v)
+
+    def strs(v):
+        return isinstance(v, dict) and all(isinstance(a, str) for a in v.values())
+    fits = {"relative": lambda v: v is None or ints(v, 4), "pages": lambda v: type(v) is bool,
+            "fonts": lambda v: v is None or strs(v), "laid": lambda v: v is None or ints(v, 3),
+            "paged": lambda v: v is None or isinstance(v, str) and v in paths, "popups": lambda v: type(v) is bool,
+            "texts": lambda v: isinstance(v, list) and all(isinstance(t, str) for t in v)}
+
+    def kind(k):
+        return isinstance(k, list) and k and all(
+            isinstance(s, list) and len(s) == 3 and type(s[0]) is int and type(s[1]) is int
+            and s[0] > 0 and s[1] > 0 and isinstance(s[2], str) for s in k)
+
+    def shaped(s):
+        """A shape as save_contrast() writes it, decoded, or None."""
+        if not (isinstance(s, dict) and isinstance(s.get("text"), str) and strs(s.get("attrs"))
+                and type(s.get("dy")) in (int, float) and "kinds" in s
+                and (s["kinds"] is None or isinstance(s["kinds"], list) and s["kinds"]
+                     and all(map(kind, s["kinds"])))):
+            return None
+        try:
+            kinds = s["kinds"] and [[(w, h, base64.b64decode(c, validate=True)) for w, h, c in k]
+                                    for k in s["kinds"]]
+        except ValueError:
+            return None
+        if kinds and any(len(c) != w * h for k in kinds for w, h, c in k):
+            return None
+        return (s["text"], tuple(sorted(s["attrs"].items())), s["dy"]), kinds
+
+    def read(name, got, top, reads=True, shapes=True):
+        """`got`, the JSON of `name`, checked, and its shapes decoded."""
+        ok = isinstance(got, dict) and got.get("version") == 1 and top(got)
+        if ok and reads:
+            ok = (isinstance(got.get("reads"), dict) and set(got["reads"]) == set(GTK4_READS)
+                  and all(isinstance(r, dict) and all(p in paths and fits[k](v) for p, v in r.items())
+                          for k, r in got["reads"].items()))
+        decoded = []
+        if ok and shapes:
+            decoded = list(map(shaped, got.get("shapes"))) if isinstance(got.get("shapes"), list) else [None]
+            ok = None not in decoded
+        if not ok:
+            raise SessionError(f"{d / name} isn't what contrast --save writes")
+        return decoded
+    g = load("gtk4.json", False)
+    if g is None:
+        return None
+    read("gtk4.json", g, lambda g: {"trusted", "raised", "cannot", "gone"} <= set(g)
+         and type(g["trusted"]) is bool and type(g["raised"]) is bool
+         and (g.get("cannot") is None or isinstance(g["cannot"], str))
+         and (g.get("gone") is None or type(g["gone"]) is int and g["gone"] > 0), shapes=False)
+    drawings = dict(read("shapes.json", load("shapes.json"), lambda s: True, reads=False))
+    fields = load("fields.json", False)
+    if fields is not None:
+        # A field's reads, none of the same kind and node as one in gtk4.json.
+        drawings.update(read("fields.json", fields, lambda f: isinstance(f.get("reads"), dict) and not any(
+            p in g["reads"].get(k, ()) for k, r in f["reads"].items() if isinstance(r, dict) for p in r)))
+        for k, got in fields["reads"].items():
+            g["reads"][k].update(got)
+    for k in ("relative", "laid"):
+        g["reads"][k] = {p: v and tuple(v) for p, v in g["reads"][k].items()}
+    return {**{k: g[k] for k in ("trusted", "cannot", "raised", "gone")}, "reads": g["reads"],
+            "drawings": drawings}
 
 
 def placed(n, named=False):
@@ -4314,11 +4475,14 @@ def saved_contrast(d):
             got["_runs"] = runs
         walked.append((n.depth, got))
     nodes = windowed(walked)
+    g4 = saved_gtk4(d, {n.path for n in nodes})
     for n in nodes:
         n["_window"] = nodes[n._win].get("_window")
+        if g4 and nodes[n._win]._toolkit.startswith("GTK 4."):
+            n["_gtk4"] = nodes[n._win]._toolkit[4:]
         for r in n.get("_runs", ()):
             r["_win"], r["_window"] = n._win, n._window
-    return {"dir": d, "nodes": nodes, "first": png(m["screen"]),
+    return {"dir": d, "nodes": nodes, "first": png(m["screen"]), **({"gtk4": g4} if g4 else {}),
             "shots": [(png(s["file"]), s["x"], s["y"]) for s in m["samples"]],
             "hovers": {tuple(h["box"]): png(h["file"], tuple(h["box"][2:])) for h in m["hovers"]}}
 
@@ -4401,7 +4565,8 @@ def read(argv):
                     help="also what passes, with its ratio, after what fails")
     ct.add_argument("--from", dest="saved", metavar="DIR",
                     help="what contrast --save wrote to DIR, not the live screen: needs no "
-                         "session, but GTK 4's isn't measured")
+                         "session; GTK 4's is measured from what its search read and drew, "
+                         "as saved (gtk4.json), not in a run saved without it")
     ct.add_argument("--save", metavar="DIR",
                     help="also write to DIR the tree and pictures it measured, for "
                          "contrast --from DIR (the pictures can show what's typed in a field)")

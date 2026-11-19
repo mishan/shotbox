@@ -11,6 +11,24 @@ from itertools import accumulate, repeat
 from operator import mul, sub, truediv
 
 
+class Deadline:
+    """The time given to looking, counted by how often it's asked about:
+    live, `seconds` from now by the clock, keeping which ask first found it
+    gone (`gone`); given `gone` instead, as a saved run's, gone from that
+    ask on, whatever the clock says, so a run measured again from a file
+    stops where it did."""
+
+    def __init__(self, seconds=None, gone=None):
+        self.end = None if seconds is None else time.monotonic() + seconds
+        self.asked, self.gone = 0, gone
+
+    def past(self):
+        self.asked += 1
+        if self.gone is None and self.end is not None and time.monotonic() > self.end:
+            self.gone = self.asked
+        return self.gone is not None and self.asked >= self.gone
+
+
 class Picture:
     """A picture of the whole screen: width, height and RGB bytes, as
     x.pixels and wl.pixels give them."""
@@ -217,7 +235,7 @@ def framed_in(pic, area, w, h, until=None):
     # area at 4K makes hundreds of megabytes.
     lit, across, down, col = [], [None], [], array("H", bytes(2 * n))
     for i in ((y * width + x0 - 1) * 3 for y in range(y0 - 1, y1 + 1)):
-        if until and time.monotonic() > until:
+        if until and until.past():
             return None
         row = array("f", [(2 * d[j] + 5 * d[j + 1] + d[j + 2]) / 8 for j in range(i, i + n * 3, 3)])
         if lit:
@@ -229,7 +247,7 @@ def framed_in(pic, area, w, h, until=None):
     down.append(col)
     out = []
     for r in range(1, y1 - y0 - h + 2):
-        if until and time.monotonic() > until:
+        if until and until.past():
             return None
         top, bottom, upper, lower = across[r], across[r + h], down[r + 3], down[r + h - 3]
         for c in range(1, x1 - x0 - w + 2):
@@ -354,7 +372,7 @@ def find_text(pic, kinds, area, until=None, under=None):
     apart from that one, which kind and shape of it matched, and where
     that other match is, (x, y)), its x and y those of the shape, or None if `area` can't hold one, or has
     more places than PLACES to look at. Raises TimeoutError past
-    `until`, a monotonic time. With `under` (backdrop's), less what's
+    `until`, a Deadline. With `under` (backdrop's), less what's
     behind the text."""
     x0, y0, x1, y1 = area
     # The shapes' blank sides can lie outside `area`, not past the picture.
@@ -364,7 +382,7 @@ def find_text(pic, kinds, area, until=None, under=None):
     best, grid = None, None
     for k, kind in enumerate(kinds):
         for i, (w, h, cover) in enumerate(kind):
-            if until and time.monotonic() > until:
+            if until and until.past():
                 raise TimeoutError
             if w <= lit.width and h <= lit.height:
                 got = matches(lit, (w, h, cover), 0, 0, lit.width - w + 1, lit.height - h + 1)
@@ -392,7 +410,7 @@ def match_over(pic, kinds, box, until=None, under=None):
     """How well one of `kinds` of shapes (find_text's) matches what's drawn
     over `box` (x, y, width, height): placed so the text, the shape but
     for its blank sides, is inside the box or holds it; with `under`, as
-    find_text. Raises TimeoutError past `until`, a monotonic time."""
+    find_text. Raises TimeoutError past `until`, a Deadline."""
     bx, by, bw, bh = box
     shapes = [shape for kind in kinds for shape in kind]
     # Where each shape's corner can be: x0, y0, x1, y1, inclusive.
@@ -403,7 +421,7 @@ def match_over(pic, kinds, box, until=None, under=None):
                     max(s[3] + h for s, (_, h, _) in zip(spans, shapes)), under)
     got = 0.0
     for (sx0, sy0, sx1, sy1), shape in zip(spans, shapes):
-        if until and time.monotonic() > until:
+        if until and until.past():
             raise TimeoutError
         # Cut to the picture.
         x0, y0 = max(sx0 - lit.x0, 0), max(sy0 - lit.y0, 0)
