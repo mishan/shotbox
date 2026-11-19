@@ -6,10 +6,11 @@ test/contrast_gtk4_test.py SHOTBOX."""
 
 import base64
 import random
+import re
 import sys
 
 import contrast_fixture
-from contrast_fixture import Pic, check, contrast, node, window
+from contrast_fixture import WHITE, Pic, check, contrast, node, window
 
 FAINT, DARK = (0xa0,) * 3, (0x20,) * 3
 DOWN = (0, -0.25, 0.25, 0.5)   # 4.16's shapes, at fractions of a pixel
@@ -49,9 +50,17 @@ def shape(text):
 class Gtk4Window:
     """A GTK 4 window `size` big, of nodes added by path in tree order."""
 
-    def __init__(self, release, size=(300, 120)):
+    def __init__(self, release, size=(300, 120), back=WHITE, grid=None):
+        """Its background `back`, lines of a `grid` color across it every
+        24 pixels, from its left and its bottom, as CSS's
+        repeating-linear-gradient draws them."""
         self.release = tuple(map(int, release.split(".")))
-        self.pic = Pic(*size)
+        self.pic = Pic(*size, back=back)
+        w, h = size
+        for x in range(0, w, 24) if grid else ():
+            self.pic.fill(x, 0, 1, h, grid)
+        for y in range(h - 1, -1, -24) if grid else ():
+            self.pic.fill(0, y, w, 1, grid)
         self.nodes = [window(toolkit=f"GTK {release}", bounds=[0, 0, *size], window=[0, 0, *size])]
         self.reads = {k: {} for k in ("relative", "pages", "fonts", "laid", "paged", "popups", "texts")}
 
@@ -115,7 +124,11 @@ def boxed(release):
 
 
 def run(case, got, want):
-    check(got[:2] == want, f"contrast --from, GTK 4: {case}" + ("" if got[:2] == want else f": {got}"))
+    """Whether contrast said `want`: (status, lines), a line a pattern
+    where it's re.Pattern."""
+    ok = got[0] == want[0] and len(got[1]) == len(want[1]) and all(
+        w.fullmatch(g) if isinstance(w, re.Pattern) else g == w for g, w in zip(got[1], want[1]))
+    check(ok, f"contrast --from, GTK 4: {case}" + ("" if ok else f": {got}"))
 
 
 L0 = "frame/panel[0]/label[0]: text "
@@ -182,5 +195,30 @@ for args, st in [((), 0), (("--strict",), 1)]:
     run(f"what isn't measured, failing only with --strict ({' '.join(args)})",
         label(dark("4.14.6", "Hello"), 1, "\u00dcber", [10, 40, 80, 16], (16, 45), DARK).contrast(*args),
         (st, ["frame/panel[0]/label[1]: text " + NOTED + " (not all ASCII: GTK measures its width short)"]))
+
+# Text over a dark theme's grid, whose lines vary as much as faint text
+# does, beside text that passes: faint, found and failing; faint and
+# spaced, not found, but nothing where it can be has the contrast it
+# needs, failing too; readable and spaced, not found, a note, failing
+# only with --strict. What GTK says of that: from 4.14.6, how much wider
+# it lays it out than it's drawn.
+GLOOM, LINES = (0x0f, 0x0d, 0x14), (0x1e, 0x19, 0x29)
+DIM, LIGHT = (0x3a, 0x34, 0x46), (0xeb, 0xe6, 0xf0)
+for release, spaced, ending in [
+        ("4.14.5", r"no match good enough: 0\.\d\d at best", "the corner of the box GTK 4.14.5 says"),
+        ("4.14.6", "GTK lays it out 30 px wider than its font draws it: letter-spaced, larger or upper case",
+         "where GTK 4.14.6 says its text is")]:
+    for case, color, spacing, args, want in [
+            ("faint", DIM, 0, (), (1, [L0 + "1.61:1, #3a3446 on #0f0d14 (at least 4.5); found 6,5 px from "
+                                       + ending])),
+            ("faint and spaced", DIM, 3, (), (1, [L0 + "not found, but nothing where it can be has the "
+                                                  "contrast it needs: the best anything there reaches is "
+                                                  "1.65:1 (at least 4.5)"])),
+            *[(f"readable and spaced{', --strict' * st}", LIGHT, 3, ("--strict",) * st,
+               (st, [re.compile(re.escape(L0 + NOTED + " (") + spaced + r"\)")])) for st in (0, 1)]]:
+        win = Gtk4Window(release, back=GLOOM, grid=LINES).add("frame/panel[0]", "panel", says=[10, 10, 280, 60])
+        label(win, 0, "Faint words", SAYS, (16, 15), color, spacing=spacing)
+        label(win, 1, "Shown", [10, 40, 80, 16], (16, 45), LIGHT)
+        run(f"over a grid, {case} ({release})", win.contrast(*args), want)
 
 sys.exit(bool(contrast_fixture.fails))
