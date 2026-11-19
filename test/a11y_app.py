@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """A libadwaita window to read the accessible tree of: test/a11y_app.py
 [fixed] [notes] [trap] [dialog] [lists] [one] [unfocusable] [untitled] [second] [faint]
-[thin] [long [down]] [keys] [form] [decoys] [lines] [twin [hidden] [under]] [over [hidden] [drawn | named]] [slow] [alert]
+[thin] [long [down]] [keys] [form] [decoys] [lines] [twin] [titled] [slow] [alert]
 [freeze] [ready [late]] [modal] [warned] [paged] [drawing] [fading]. Its icon-only button,
 its status icon and its drawing area have no accessible name unless
 `fixed`, nor has the window with `untitled`, and `second` opens an
@@ -19,15 +19,9 @@ named by a label with a mnemonic, `decoys` faint labels drawn otherwise
 than their font says (letter-spaced, upper case), each over an entry
 holding its text or showing it as a placeholder, or a drawing area
 drawing it (not all ASCII), `lines` a button labeled over two lines;
-`twin` a faint "Twin" over an entry holding it, in a box padded below
-alone, with `under` under it, with `hidden` a hidden "Twin" over the
-label; `over` a box padded above holding an entry holding "Twin", a
-faint "Twin" laid over the box's top, all padded far below. With
-`hidden`, `drawn` or `named`, the box holds a tall label "Twin"
-instead, and what's laid over its top draws "Twin": a label, a drawing
-area with `drawn`, or a label named "Brother" with `named`. With
-`hidden`, a hidden "Twin" is laid over the box's label too; without,
-the box's label is faint and an entry holding "Twin" is beside it all.
+`twin` a faint "Twin" over an entry holding it, in a box padded below;
+`titled` an entry row, its title in two labels, and a hidden
+"Ghost" over "Shown", beside a "Ghost" drawn and one hidden.
 `slow`
 moves the focus a second after Tab, and `alert` says an error
 and asks in an alert dialog as it starts, again once answered, then
@@ -121,8 +115,6 @@ def activate(app):
                          " label.spaced { letter-spacing: 2px; }"
                          " label.upper { text-transform: uppercase; }"
                          " box.decoy { padding: 4px 4px 40px; } box.twin { padding: 0 0 40px; }"
-                         " box.over { padding-top: 40px; } label.tall { min-height: 40px; }"
-                         " box.far { padding-bottom: 100px; } list.dark label { color: #202020; opacity: 1; }"
                          " label.ghost { font-family: monospace; }")
     faint.add_css_class("faint")
     thin.add_css_class("thin")
@@ -182,16 +174,13 @@ def activate(app):
         pair = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, css_classes=["twin"])
         twin = Gtk.Overlay(child=Gtk.Label(label="Twin", css_classes=["faint"]),
                            halign=Gtk.Align.START)
-        if "hidden" in sys.argv:
-            twin.add_overlay(Gtk.Label(label="Twin", opacity=0))
         pair.append(twin)
-        pair.insert_child_after(Gtk.Entry(text="Twin", halign=Gtk.Align.START),
-                                None if "under" in sys.argv else twin)
+        pair.append(Gtk.Entry(text="Twin", halign=Gtk.Align.START))
         box.append(pair)
     if "titled" in sys.argv:
         # An entry row has two title labels, one drawn at a time: filled,
-        # the small one over its text; dark, it passes.
-        rows = Gtk.ListBox(css_classes=["boxed-list"] + ["dark"] * ("dark" in sys.argv))
+        # the small one over its text.
+        rows = Gtk.ListBox(css_classes=["boxed-list"])
         rows.append(Adw.EntryRow(title="Display name", text="Neon Doll"))
         box.append(rows)
         # Not drawn, but neither where another node with its text is: over
@@ -202,30 +191,6 @@ def activate(app):
         box.append(Gtk.Label(label="Ghost", halign=Gtk.Align.START))
         box.append(Gtk.Label(label="Ghost", opacity=0, css_classes=["ghost"],
                              halign=Gtk.Align.START, margin_top=40))
-    if "over" in sys.argv:
-        # GTK 4.14.6 and later say what's in the box is 40 px up, over
-        # what's laid over its top.
-        hidden = "hidden" in sys.argv
-        drawing = "drawn" in sys.argv or "named" in sys.argv
-        inside = Gtk.Box(css_classes=["over"], halign=Gtk.Align.START, valign=Gtk.Align.START)
-        inside.append(Gtk.Label(label="Twin", css_classes=["tall"] + ([] if hidden else ["faint"]))
-                      if hidden or drawing else Gtk.Entry(text="Twin"))
-        over = Gtk.Overlay(child=inside, halign=Gtk.Align.START)
-        top = drawn("Twin") if "drawn" in sys.argv else Gtk.Label(
-            label="Twin", css_classes=[] if hidden or drawing else ["faint"])
-        if "named" in sys.argv:
-            top.update_property([Gtk.AccessibleProperty.LABEL], ["Brother"])
-        top.set_halign(Gtk.Align.START)
-        top.set_valign(Gtk.Align.START)
-        over.add_overlay(top)
-        if hidden:
-            over.add_overlay(Gtk.Label(label="Twin", opacity=0, margin_top=40, css_classes=["tall"],
-                                       halign=Gtk.Align.START, valign=Gtk.Align.START))
-        pair = Gtk.Box(css_classes=["far"])
-        if drawing and not hidden:
-            pair.append(Gtk.Entry(text="Twin", valign=Gtk.Align.END, width_chars=4))
-        pair.append(over)
-        box.append(pair)
     if "keys" in sys.argv:
         box = Gtk.Box()
         for label in ("1", "2", ".", "+", "(Draft)"):

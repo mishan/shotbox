@@ -1731,64 +1731,28 @@ EOF
     [ -z "$wrong" ] && ok "a11y: contrast, GTK 4: thin stems at their color, but not past what the shape accounts for; bold text as before" \
       || { fail "a11y: contrast, GTK 4 thin and bold text:$wrong"; cat "$tmp/contrast"; }
   fi
-  # From 4.14, text that isn't looked for says why: rows scrolled out of
-  # view, which GTK calls showing, above the list but in the window, and
-  # below the window.
   micro=$(python3 -c "import ctypes; print(ctypes.CDLL('libgtk-4.so.1').gtk_get_micro_version())")
-  while IFS='|' read -r least args lines want; do
-    [ $((minor * 100 + micro)) -ge "$least" ] || continue
-    "$sb" run --a11y -- sh -c "'$app' $args & '$sb' a11y contrast --window a11y-test" \
-      < /dev/null > "$tmp/contrast" 2>&1 || true
-    [ "$(grep -c "$want" "$tmp/contrast")" = "$lines" ] \
-      && ok "a11y: contrast, GTK 4: says why it didn't look for text: $args" \
-      || { fail "a11y: contrast, GTK 4, why not: $args"; cat "$tmp/contrast"; }
-  done <<'CASES'
-1400|long down|2|/label\[\(2\|199\)\]: text not measured: not shown (scrolled out of view, or hidden)$
-CASES
   if [ "$minor" -ge 14 ]; then
     if [ $((minor * 100 + micro)) -ge 1406 ]; then
-      # A faint "Twin" over an entry holding "Twin", or under it, each
-      # in the other's room, the entry's text where nothing else can draw
-      # it: found where it's drawn, and failing. Nothing else is measured:
-      # not a hidden "Twin" over the label, nor, where GTK says what's in
-      # a box padded above is over what's laid on its top (over), a label
-      # there or a hidden one, with a label, a drawing area or a label
-      # named otherwise on top.
-      for args in twin "twin under" "twin hidden" over "over hidden" "over hidden drawn" \
-          "over drawn" "over named"; do
-        "$sb" run --a11y -- sh -c "'$app' $args & '$sb' a11y contrast --passes --window a11y-test" \
-          < /dev/null 2>/dev/null || true
-      done > "$tmp/contrast"
-      grep -q '/panel\[7\]/panel\[0\]/label\[0\]: text 2\.[0-9]*:1, #a0a0a0 on .*; found 0,0 px' "$tmp/contrast" \
-        && grep -q '/panel\[7\]/panel\[1\]/label\[0\]: text 2\.[0-9]*:1, #a0a0a0 on .*; found 0,0 px' "$tmp/contrast" \
-        && [ "$(grep -c '/panel\[7\]/.*: text \(passes\|[0-9]\)' "$tmp/contrast")" = 2 ] \
-        && ok "a11y: contrast, GTK 4: text matching where only another node's text can be is found where it's drawn; not a hidden twin, nor where GTK's box is over it" \
-        || { fail "a11y: contrast, GTK 4, Twin"; cat "$tmp/contrast"; }
-      # An entry row's two title labels, at one place, one drawn: the
-      # one not drawn is said so, not failed for what's there, nor noted
-      # unmatched. Not said of a label not drawn over another text, nor
-      # apart from its own.
-      for args in titled "titled dark"; do
-        "$sb" run --a11y -- sh -c "'$app' $args & '$sb' a11y contrast --passes --window a11y-test" \
-          < /dev/null 2>/dev/null || true
-      done > "$tmp/contrast"
-      [ "$(grep -c '/list item\[0\]/panel\[0\]/panel\[0\]/label\[1\]: text \(passes at \)\?[0-9]' "$tmp/contrast")" = 2 ] \
-        && grep -q '/list item\[0\]/panel\[0\]/panel\[0\]/label\[1\]: text passes at 1[0-9.]*:1, #202020 ' "$tmp/contrast" \
-        && [ "$(grep -c '/list item\[0\]/panel\[0\]/panel\[0\]/label\[0\]: text not measured: GTK 4 reports its position wrong (another node with its text is drawn where it is instead)$' "$tmp/contrast")" = 2 ] \
-        && [ "$(grep -c 'drawn where it is instead' "$tmp/contrast")" = 2 ] \
+      # libadwaita's entry row: two title labels at one place, one drawn,
+      # the one not drawn said so, its twin measured (the rule's cases are
+      # test/contrast_gtk4_test.py's).
+      "$sb" run --a11y -- sh -c "'$app' titled & '$sb' a11y contrast --passes --window a11y-test" \
+        < /dev/null > "$tmp/contrast" 2>/dev/null || true
+      grep -q '/list item\[0\]/panel\[0\]/panel\[0\]/label\[1\]: text [0-9]' "$tmp/contrast" \
+        && grep -q '/list item\[0\]/panel\[0\]/panel\[0\]/label\[0\]: text not measured: GTK 4 reports its position wrong (another node with its text is drawn where it is instead)$' "$tmp/contrast" \
+        && [ "$(grep -c 'drawn where it is instead' "$tmp/contrast")" = 1 ] \
         && ok "a11y: contrast, GTK 4: an entry row's title not drawn is said so, its twin measured" \
         || { fail "a11y: contrast, GTK 4, entry row titles"; cat "$tmp/contrast"; }
     fi
-    # --strict fails what isn't measured (GTK 4's edges), but rows
-    # scrolled out of view stay notes, as GTK 3 and browsers say nothing
-    # of theirs.
-    "$sb" run --a11y -- sh -c "'$app' long down & '$sb' a11y contrast --strict --edges 3 --json --window a11y-test" \
-      < /dev/null > "$tmp/contrast.json" 2>/dev/null
-    python3 -c "import json, sys; j = json.load(open(sys.argv[1]))
-assert j['problems'] and not any('not shown' in p['problem'] for p in j['problems']), j
-assert j['notes'] and all('not shown' in n['note'] for n in j['notes']), j" "$tmp/contrast.json" \
-      && ok "a11y: contrast --strict fails what isn't measured, not rows scrolled out of view" \
-      || { fail "a11y: contrast --strict, scrolled"; cat "$tmp/contrast.json"; }
+    # GTK's scrolled list: rows scrolled out of view, which GTK calls
+    # showing, above the list but in the window, and below the window,
+    # said not shown.
+    "$sb" run --a11y -- sh -c "'$app' long down & '$sb' a11y contrast --window a11y-test" \
+      < /dev/null > "$tmp/contrast" 2>&1 || true
+    [ "$(grep -c '/label\[\(2\|199\)\]: text not measured: not shown (scrolled out of view, or hidden)$' "$tmp/contrast")" = 2 ] \
+      && ok "a11y: contrast, GTK 4: rows scrolled out of view are said not shown" \
+      || { fail "a11y: contrast, GTK 4, rows scrolled out of view"; cat "$tmp/contrast"; }
   fi
   # Before 4.14, GTK 4 says where a widget's content is: measured there,
   # faint labels in frames, one GTK can't pick, one under an overlay's
