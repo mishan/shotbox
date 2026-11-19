@@ -1746,64 +1746,7 @@ EOF
 1400|long down|2|/label\[\(2\|199\)\]: text not measured: not shown (scrolled out of view, or hidden)$
 CASES
   if [ "$minor" -ge 14 ]; then
-    # From 4.14.6, where "check" can be takes in "unchecked" under it:
-    # "unchecked" is found, "check" inside it being no match for all of
-    # it, and "check", matching in both, is taken at its own, the other
-    # being inside "unchecked", found: passing, and faint, failing there.
     if [ $((minor * 100 + micro)) -ge 1406 ]; then
-      for args in nested "nested pale"; do
-        "$sb" run --a11y -- sh -c "'$app' $args & '$sb' wait window a11y-test >/dev/null &&
-          '$sb' a11y contrast --passes" < /dev/null 2>/dev/null || true
-      done > "$tmp/contrast"
-      [ "$(grep -c '/panel\[7\]/label\[1\]: text passes at .*; found ' "$tmp/contrast")" = 2 ] \
-        && grep -q '/panel\[7\]/label\[0\]: text passes at .*; found ' "$tmp/contrast" \
-        && grep -q '/panel\[7\]/label\[0\]: text 2\.[0-9]*:1, #a0a0a0 on .*; found ' "$tmp/contrast" \
-        && ok "a11y: contrast, GTK 4: text found though shorter text inside it matches there; the shorter at its own place" \
-        || { fail "a11y: contrast, GTK 4, check over unchecked"; cat "$tmp/contrast"; }
-      # Under "Recheck", whose text holds it, "check"'s own place is in
-      # doubt: a faint one fails in both places only over a faint
-      # "unchecked", at the better one; where one passes, it's still a
-      # note. Without --window, which would fail it as not found but faint.
-      for args in "nested recheck pale" "nested recheck pale both"; do
-        "$sb" run --a11y -- sh -c "'$app' $args & '$sb' wait window a11y-test >/dev/null &&
-          '$sb' a11y contrast --passes" < /dev/null 2>/dev/null || true
-      done > "$tmp/contrast"
-      grep -q '/label\[1\]: text 2\.[0-9]*:1 at best, #a0a0a0 on .*; it matches in two places and fails in both; found ' "$tmp/contrast" \
-        && [ "$(grep -c '/label\[1\]: text not measured: GTK 4 reports its position wrong (it matches elsewhere too, in "unchecked")$' "$tmp/contrast")" = 1 ] \
-        && ok "a11y: contrast, GTK 4: text matching in two places fails where it fails in both, else not" \
-        || { fail "a11y: contrast, GTK 4, faint check over unchecked"; cat "$tmp/contrast"; }
-      # Blinking, and not drawn when first pictured, it's looked for in
-      # the pictures after: where it's in doubt it's taken as in the
-      # first, only to fail in both places, so it's measured over a faint
-      # "unchecked" (taken: the line ends at its colors). Over one that
-      # passes, it isn't, but what's there bounds it, so it's changing,
-      # as found outright, failing only with --strict. Run till a first
-      # picture misses it, as one that catches it measures it as above,
-      # each a little later, so that they fall all around the blink.
-      for args in "nested recheck pale" "nested recheck pale both"; do
-        for i in 1 2 3 4 5 6 7 8; do
-          "$sb" run --a11y -- sh -c "'$app' $args blink & '$sb' wait window a11y-test >/dev/null &&
-            sleep 0.$i && '$sb' a11y contrast --window a11y-test" < /dev/null 2>/dev/null > "$tmp/blink" || true
-          grep -q '/label\[1\]: text \(changing: \|.* changing from 1\.0.* (at least 4\.5)$\)' "$tmp/blink" && break
-        done
-        cat "$tmp/blink"
-      done > "$tmp/contrast"
-      grep -q '/label\[1\]: text changing: 1\.0[0-9]:1 to 1[0-9]\.[0-9]*:1 (at least 4\.5)$' "$tmp/contrast" \
-        && grep -q '/label\[1\]: text 2\.[0-9]*:1 at best, changing from 1\.0[0-9]:1, #a0a0a0 on #[0-9a-f]* (at least 4\.5)$' "$tmp/contrast" \
-        && ok "a11y: contrast, GTK 4: text blinking, matching in two places, is taken in later pictures only to fail in both" \
-        || { fail "a11y: contrast, GTK 4, blinking check over unchecked"; cat "$tmp/contrast"; }
-      # Under "Recheck", whose room takes in both, "check" names the node
-      # where its other match is. A hidden "Open File" isn't taken for
-      # "Open" and "File" drawn side by side under it: "Open" is drawn
-      # only there.
-      for args in "nested recheck" split; do
-        "$sb" run --a11y -- sh -c "'$app' $args & '$sb' a11y contrast --passes --window a11y-test" \
-          < /dev/null 2>/dev/null || true
-      done > "$tmp/contrast"
-      grep -q '/label\[1\]: text not measured: GTK 4 reports its position wrong (it matches elsewhere too, in "unchecked")$' "$tmp/contrast" \
-        && grep -q '/panel\[7\]/label\[0\]: text not measured: GTK 4 reports its position wrong (another node.s text matches there too: "Open")$' "$tmp/contrast" \
-        && ok "a11y: contrast, GTK 4: the other match's own node named; text not taken for pieces of it drawn only there" \
-        || { fail "a11y: contrast, GTK 4, Recheck and Open File"; cat "$tmp/contrast"; }
       # A faint "Twin" over an entry holding "Twin", or under it, each
       # in the other's room, the entry's text where nothing else can draw
       # it: found where it's drawn, and failing. Nothing else is measured:
@@ -1996,35 +1939,6 @@ bad = [m for m, ok in [
     ("Hid", noted("Hid", "partly out of view"))] if not ok]
 print(*bad, *[f"{k}: {v.get('problem') or v.get('contrast') or v.get('note')}"
               for k, v in said.items()], sep="\n")
-sys.exit(bool(bad))
-PY
-    # Text found in two places, one inside where another's text is found
-    # (gtk4_window.py owned): taken at the other, "tick" passing and "dim"
-    # failing, as any found once. Not the first "pair", whose other place
-    # is the second's, not taken; nor the second, whose other place is in
-    # "unpair", as looked for again at the one left, the first's room
-    # reaches it. And text another node holds too, found where only that
-    # one's room reaches as well: "Same" passing and "Pale" failing.
-    "$sb" run --a11y -- sh -c "'$here/gtk4_window.py' owned & '$sb' wait window gtk4-owned >/dev/null &&
-      sleep 1 && '$sb' a11y contrast --passes --window gtk4-owned --json" > "$tmp/owned" 2>/dev/null || true
-    python3 - "$tmp/owned" <<'PY' && ok "a11y: contrast, GTK 4 text found where another's is found is taken at its other place" \
-      || { fail "a11y: contrast, GTK 4 text where another's is found"; cat "$tmp/owned"; }
-import json, sys
-got = json.load(open(sys.argv[1]))
-said = {(n["name"], n["path"].split("/")[-2]): n.get("contrast") or n.get("problem") or n.get("note")
-        for k in ("problems", "passes", "notes") for n in got[k] if n["role"] == "label"}
-def passes(name, parent):
-    line = said.get((name, parent), "")
-    return line.startswith("text passes at ") and "#101010 on #f0f0f0" in line
-def fails(name, parent):
-    line = said.get((name, parent), "")
-    return line.startswith("text 1.") and "#c8c8c8 on #f0f0f0" in line and "at best" not in line
-bad = [m for m, ok in [
-    ("tick", passes("tick", "check box[0]")), ("dim", fails("dim", "check box[0]")),
-    ("first pair", "matches elsewhere too" in said.get(("pair", "check box[0]"), "")),
-    ("second pair", "matches elsewhere too, in \"unpair\"" in said.get(("pair", "check box[1]"), "")),
-    ("Same", passes("Same", "panel[3]")), ("Pale", fails("Pale", "panel[4]"))] if not ok]
-print(*bad, *[f"{k}: {v}" for k, v in said.items()], sep="\n")
 sys.exit(bool(bad))
 PY
   else

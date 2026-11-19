@@ -47,6 +47,13 @@ def shape(text):
     return [len(cols), TALL, base64.b64encode(cover).decode()]
 
 
+def paint(pic, name, drawn, color, spacing):
+    for x, c in enumerate(columns(name, spacing)):
+        for y in range(TALL):
+            if c >> y & 1:
+                pic.fill(drawn[0] + x, drawn[1] + y, 1, 1, color)
+
+
 class Gtk4Window:
     """A GTK 4 window `size` big, of nodes added by path in tree order."""
 
@@ -62,38 +69,44 @@ class Gtk4Window:
         for y in range(h - 1, -1, -24) if grid else ():
             self.pic.fill(0, y, w, 1, grid)
         self.nodes = [window(toolkit=f"GTK {release}", bounds=[0, 0, *size], window=[0, 0, *size])]
+        self.blinking = []
         self.reads = {k: {} for k in ("relative", "pages", "fonts", "laid", "paged", "popups", "texts")}
 
-    def add(self, path, role, name="", says=None, drawn=None, color=FAINT, spacing=0, states=()):
-        """A node GTK `says` is at [x, y, w, h], its name drawn in `color`
-        with its corner at `drawn`, `spacing` more between its glyphs. GTK
+    def add(self, path, role, name="", says=None, drawn=None, color=FAINT, spacing=0, states=(),
+            blink=False, text=None):
+        """A node GTK `says` is at [x, y, w, h], its name, or the `text` typed
+        in it (a field), drawn in `color` with its corner at `drawn`,
+        `spacing` more between its glyphs; if it's to `blink`, not in the
+        first picture, but in those after. GTK
         says its extents in its parent's are its box less its parent's,
         and from 4.14.6 lays its text out at its box's corner, as wide as
         it's drawn. A node of one child but a button has no actions, as
         a stack's page."""
         up = next(n for n in self.nodes if n["path"] == path.rsplit("/", 1)[0])
-        self.nodes.append(node(path, role, name, ["showing", "visible", *states], says))
+        editable = ["editable"] * (text is not None)
+        self.nodes.append(node(path, role, name, ["showing", "visible", *states, *editable], says))
         r = self.reads
         r["relative"][path] = says and up["bounds"] and [
             says[0] - up["bounds"][0], says[1] - up["bounds"][1], *says[2:]]
-        r["fonts"][path] = {"family-name": "Fixture", "size": "13", "run-end": str(len(name))}
+        r["fonts"][path] = {"family-name": "Fixture", "size": "13", "run-end": str(len(text or name))}
         end = len(name) - (self.release >= (4, 22, 3))
         r["laid"][path] = None if self.release < (4, 14, 6) or not end else [
             0, 0, len(columns(name[:end], spacing))]
         r["paged"][path] = path
         r["popups"][path] = False
-        r["texts"][path] = [name] if name else []
-        if drawn:
-            x0, y0 = drawn
-            for x, c in enumerate(columns(name, spacing)):
-                for y in range(TALL):
-                    if c >> y & 1:
-                        self.pic.fill(x0 + x, y0 + y, 1, 1, color)
+        r["texts"][path] = [t for t in (name, text) if t]
+        if drawn and blink:
+            self.blinking.append((text or name, drawn, color, spacing))
+        elif drawn:
+            paint(self.pic, text or name, drawn, color, spacing)
         return self
 
     def contrast(self, *args, trusted=False):
         """contrast --from what a live run would have saved of this window
         with `args` and --window, GTK's bounds `trusted`."""
+        later = self.pic.copy()
+        for d in self.blinking:
+            paint(later, *d)
         paths = [n["path"] for n in self.nodes]
         self.reads["pages"] = {p: "button" not in n["role"] and sum(
             q.rsplit("/", 1)[0] == p for q in paths) == 1 for p, n in zip(paths, self.nodes)}
@@ -108,10 +121,21 @@ class Gtk4Window:
                   for dy in downs]
         for s in shapes:
             s["attrs"] = dict(s["attrs"])
+        # Every read of a field, and every shape of its texts, only in
+        # fields.json, as --save keeps them.
+        fields = {n["path"] for n in self.nodes if "editable" in n["states"]}
+        typed = {t for p in fields for t in self.reads["texts"][p]}
+        apart = {k: ({p: v for p, v in r.items() if p not in fields},
+                     {p: v for p, v in r.items() if p in fields}) for k, r in self.reads.items()}
         gtk4 = {"version": 1, "trusted": trusted, "cannot": None, "raised": True, "gone": None,
-                "reads": self.reads}
-        return contrast(self.nodes, self.pic, *args,
-                        files=[("gtk4.json", gtk4), ("shapes.json", {"version": 1, "shapes": shapes})])
+                "reads": {k: r[0] for k, r in apart.items()}}
+        files = [("gtk4.json", gtk4), ("shapes.json", {"version": 1, "shapes": [
+            x for x in shapes if x["text"] not in typed]})]
+        if fields:
+            files.append(("fields.json", {"version": 1, "reads": {k: r[1] for k, r in apart.items()},
+                                          "shapes": [x for x in shapes if x["text"] in typed]}))
+        return contrast(self.nodes, self.pic, *args, samples=[(later, 0, 0)] * bool(self.blinking),
+                        files=files)
 
 
 def label(win, i, name, says, drawn, color=FAINT, up="frame/panel[0]", **more):
@@ -216,9 +240,116 @@ for release, spaced, ending in [
                                                   "1.65:1 (at least 4.5)"])),
             *[(f"readable and spaced{', --strict' * st}", LIGHT, 3, ("--strict",) * st,
                (st, [re.compile(re.escape(L0 + NOTED + " (") + spaced + r"\)")])) for st in (0, 1)]]:
-        win = Gtk4Window(release, back=GLOOM, grid=LINES).add("frame/panel[0]", "panel", says=[10, 10, 280, 60])
+        win = Gtk4Window(release, back=GLOOM, grid=LINES).add("frame/panel[0]", "panel",
+                                                               says=[10, 10, 280, 60])
         label(win, 0, "Faint words", SAYS, (16, 15), color, spacing=spacing)
         label(win, 1, "Shown", [10, 40, 80, 16], (16, 45), LIGHT)
         run(f"over a grid, {case} ({release})", win.contrast(*args), want)
+
+
+def stacked(texts, faint=(), blink=False):
+    """A box of labels one over another, as GTK 4.14.6 lays them out:
+    padded 4 round and 40 below, so each one's room takes in those under
+    it, its labels said 4 left of where they're drawn and 8 up."""
+    win = Gtk4Window("4.14.6", (300, 160)).add("frame/panel[0]", "panel",
+                                                says=[5, 15, 290, 44 + 19 * len(texts)])
+    for i, t in enumerate(texts):
+        label(win, i, t, [5, 15 + 19 * i, 6 * len(t) + 7, 19], (9, 23 + 19 * i),
+              FAINT if t in faint else DARK, blink=blink)
+    return win
+
+
+# "check" over "unchecked": "unchecked" found, "check" inside it no match
+# for all of it; "check", matching in both, taken at its own place, the
+# other being inside "unchecked", found.
+PASSING = "passes at 16.29:1, #202020 on #ffffff (at least 4.5)"
+FAILING = "2.61:1, #a0a0a0 on #ffffff (at least 4.5)"
+FOUND48 = "; found 4,8 px from where GTK 4.14.6 says its text is"
+L1 = "frame/panel[0]/label[1]: text "
+for faint, st in [((), 0), (("check",), 1)]:
+    run("text found though shorter text inside it matches there; the shorter at its own place"
+        + " (faint)" * bool(faint), stacked(["check", "unchecked"], faint).contrast("--passes"),
+        (st, [L0 + (FAILING if faint else PASSING) + FOUND48, L1 + PASSING + FOUND48]))
+
+# Under "Recheck", which holds "check", "check"'s own place is in doubt:
+# it fails in both places only over a faint "Reecheck", at the better;
+# where one passes, it's a note naming the other. "Reecheck" is drawn as
+# "Recheck" nearly is, but doesn't hold it, so it isn't found apart from
+# it, as real fonts draw "unchecked". Blinking, not drawn when first
+# pictured, it's looked for in the pictures after, its doubt as before:
+# over a faint "Reecheck" taken, only to fail in both, at its colors;
+# over one that passes, bounded by what's there, changing: up to 16.57:1,
+# the most anything where it can be reaches, not its own 16.29:1.
+TWICE = 'not measured: GTK 4 reports its position wrong (it matches elsewhere too, in "Reecheck")'
+for case, faint, blink, want in [
+        ("matching in two places, faint, where the other passes, a note", ["check"], False, TWICE),
+        ("matching in two places, faint in both, failing at the better", ["check", "Reecheck"], False,
+         "2.61:1 at best, #a0a0a0 on #ffffff (at least 4.5); it matches in two places and fails in both"
+         + FOUND48),
+        ("matching in two places, passing, a note", [], False, TWICE),
+        ("blinking, matching in two places, where the other passes, changing", ["check"], True,
+         "changing: 1.01:1 to 16.57:1 (at least 4.5)"),
+        ("blinking, matching in two places, faint in both, failing at its colors",
+         ["check", "Reecheck"], True,
+         "2.61:1 at best, changing from 1.01:1, #a0a0a0 on #ffffff (at least 4.5)")]:
+    _, out, _ = stacked(["Recheck", "check", "Reecheck"], faint, blink).contrast("--passes")
+    got = [line for line in out if line.startswith(L1)]
+    check(got == [L1 + want], f"contrast --from, GTK 4: {case}" + ("" if got == [L1 + want] else f": {out}"))
+
+# A hidden "Open File" isn't taken for "Open" and "File" drawn side by
+# side under it, where it would draw them: "Open" is drawn only there.
+split = Gtk4Window("4.14.6", (300, 160)).add("frame/panel[0]", "panel", says=[5, 15, 290, 82])
+split.add("frame/panel[0]/label[0]", "label", "Open File", [5, 15, 61, 19])
+split.add("frame/panel[0]/panel[1]", "panel", says=[5, 34, 280, 19])
+FILE = 9 + len(columns("Open ")) + 1
+label(split, 0, "Open", [5, 34, 31, 19], (9, 42), DARK, up="frame/panel[0]/panel[1]")
+label(split, 1, "File", [FILE - 4, 34, 31, 19], (FILE, 42), DARK, up="frame/panel[0]/panel[1]")
+OTHER = "not measured: GTK 4 reports its position wrong (another node's text matches there too: "
+run("text not taken for pieces of it drawn side by side, nor they for it", split.contrast("--passes"),
+    (2, [L0 + OTHER + '"Open")', "frame/panel[0]/panel[1]/label[0]: text " + OTHER + '"Open File")',
+         "frame/panel[0]/panel[1]/label[1]: text " + OTHER + '"Open File")']))
+
+# Check boxes in rows, and entries each above a label of their text, in
+# its room, as GTK lays them out in a padded, bordered box. Text found in
+# two places, one inside another's found and taken there, is taken at the
+# other: "tick" passing and "dim" failing. Not the first "pair", whose
+# other place is the second's, not taken; nor the second, whose other
+# place is in "unpair", and looked for again at the one left, the first's
+# room reaches it. And text an entry holds too, found where only that
+# one's room reaches as well: "Same" passing, "Pale" failing.
+GRAY, INK, PALE = (0xf0,) * 3, (0x10,) * 3, (0xc8,) * 3
+owned = Gtk4Window("4.14.6", (454, 359), back=GRAY).add("frame/panel[0]", "panel", says=[0, 0, 454, 359])
+for i, y, h, boxes in [(0, 0, 27, [("tick", INK), ("untick", INK)]),
+                       (1, 39, 19, [("dim", PALE), ("undim", PALE)]),
+                       (2, 70, 27, [("pair", INK), ("pair", INK), ("unpair", INK)])]:
+    owned.add(f"frame/panel[0]/panel[{i}]", "panel", says=[0, y, 440, h])
+    x = 0
+    for j, (t, color) in enumerate(boxes):
+        box, wide = f"frame/panel[0]/panel[{i}]/check box[{j}]", 6 * len(t) + 7
+        owned.add(box, "check box", t, [x, y, 20 + wide, h])
+        owned.add(box + "/panel[0]", "panel", says=[x, y + 1, 16, 16])
+        owned.add(box + "/label[1]", "label", t, [x + 20, y, wide, 19], (x + 31, y + 13), color)
+        x += 26 + wide
+for i, t, y, color in [(3, "Same", 109, INK), (4, "Pale", 231, PALE)]:
+    owned.add(f"frame/panel[0]/panel[{i}]", "panel", says=[0, y, 168, 110])
+    owned.add(f"frame/panel[0]/panel[{i}]/text[0]", "text", f"{t} field", [0, y, 168, 34], (13, y + 21), INK,
+              text=t)
+    label(owned, 1, t, [0, y + 40, 168, 19], (7, y + 49), color, up=f"frame/panel[0]/panel[{i}]")
+TAKEN = " px from where GTK 4.14.6 says its text is"
+DIMLY = "text 1.46:1, #c8c8c8 on #f0f0f0 (at least 4.5); found "
+INKY = "text passes at 16.69:1, #101010 on #f0f0f0 (at least 4.5); found "
+run("text found in two places, one inside where another's is found, taken at the other",
+    owned.contrast("--passes"),
+    (1, [f"frame/panel[0]/panel[1]/check box[0]/label[1]: {DIMLY}11,13{TAKEN}",
+         f"frame/panel[0]/panel[1]/check box[1]/label[1]: {DIMLY}11,13{TAKEN}",
+         f"frame/panel[0]/panel[4]/label[1]: {DIMLY}7,9{TAKEN}",
+         f"frame/panel[0]/panel[0]/check box[0]/label[1]: {INKY}11,13{TAKEN}",
+         f"frame/panel[0]/panel[0]/check box[1]/label[1]: {INKY}11,13{TAKEN}",
+         f"frame/panel[0]/panel[2]/check box[2]/label[1]: {INKY}11,13{TAKEN}",
+         f"frame/panel[0]/panel[3]/label[1]: {INKY}7,9{TAKEN}",
+         'frame/panel[0]/panel[2]/check box[0]/label[1]: text not measured: GTK 4 reports its position wrong '
+         '(it matches elsewhere too, in "pair")',
+         'frame/panel[0]/panel[2]/check box[1]/label[1]: text not measured: GTK 4 reports its position wrong '
+         '(it matches elsewhere too, in "unpair")']))
 
 sys.exit(bool(contrast_fixture.fails))

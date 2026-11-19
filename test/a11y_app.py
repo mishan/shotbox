@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """A libadwaita window to read the accessible tree of: test/a11y_app.py
 [fixed] [notes] [trap] [dialog] [lists] [one] [unfocusable] [untitled] [second] [faint]
-[thin] [long [down]] [keys] [form] [decoys] [lines] [nested [recheck] [pale [both]]] [split] [twin [hidden] [under]] [over [hidden] [drawn | named]] [slow] [alert]
+[thin] [long [down]] [keys] [form] [decoys] [lines] [twin [hidden] [under]] [over [hidden] [drawn | named]] [slow] [alert]
 [freeze] [ready [late]] [modal] [warned] [paged] [drawing] [fading]. Its icon-only button,
 its status icon and its drawing area have no accessible name unless
 `fixed`, nor has the window with `untitled`, and `second` opens an
@@ -18,11 +18,7 @@ themselves as one; `form` adds a field
 named by a label with a mnemonic, `decoys` faint labels drawn otherwise
 than their font says (letter-spaced, upper case), each over an entry
 holding its text or showing it as a placeholder, or a drawing area
-drawing it (not all ASCII), `lines` a button labeled over two lines,
-`nested` "check" over "unchecked" (under "Recheck" with `recheck`; with
-`pale` "check" faint, and with `both` "unchecked" too), padded below as
-the decoys are, `split` a hidden
-"Open File" over "Open" and "File" side by side, padded so too;
+drawing it (not all ASCII), `lines` a button labeled over two lines;
 `twin` a faint "Twin" over an entry holding it, in a box padded below
 alone, with `under` under it, with `hidden` a hidden "Twin" over the
 label; `over` a box padded above holding an entry holding "Twin", a
@@ -56,7 +52,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, GLib, Gtk, Pango, PangoCairo  # noqa: E402
+from gi.repository import Adw, Gdk, GLib, Gtk, PangoCairo  # noqa: E402
 
 
 def lists():
@@ -182,29 +178,6 @@ def activate(app):
         box = Gtk.ScrolledWindow(child=rows, vexpand=True)
         if "down" in sys.argv:
             GLib.timeout_add(300, lambda: box.get_vadjustment().set_value(60) and False)
-    if "nested" in sys.argv:
-        pair = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, css_classes=["decoy"])
-        pale = ("check", "unchecked")[:("pale" in sys.argv) + ("both" in sys.argv)]
-        for text in ("Recheck", "check", "unchecked")[("recheck" not in sys.argv):]:
-            pair.append(Gtk.Label(label=text, halign=Gtk.Align.START,
-                                  css_classes=["faint"] if text in pale else []))
-        box.append(pair)
-        if "blink" in sys.argv:
-            GLib.timeout_add(600, lambda: pair.set_opacity(1 - pair.get_opacity()) or True)
-    if "split" in sys.argv:
-        pair = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, css_classes=["decoy"])
-        whole = Gtk.Label(label="Open File", opacity=0, halign=Gtk.Align.START)
-        pair.append(whole)
-        # What "Open File" sets between the end of "Open"'s label and its
-        # "F", in whatever font there is, so "File" is drawn where "Open
-        # File" draws it.
-        gap = (whole.create_pango_layout("Open File").index_to_pos(5).x / Pango.SCALE
-               - whole.create_pango_layout("Open").get_pixel_size()[0])
-        side = Gtk.Box(spacing=round(gap))
-        for text in ("Open", "File"):
-            side.append(Gtk.Label(label=text))
-        pair.append(side)
-        box.append(pair)
     if "twin" in sys.argv:
         pair = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, css_classes=["twin"])
         twin = Gtk.Overlay(child=Gtk.Label(label="Twin", css_classes=["faint"]),
