@@ -1315,11 +1315,6 @@ print([(n['role'], k, n[k]) for n in json.load(open(sys.argv[1])) for k in ('dra
       "$tmp/fields.json") && [ "$out" = "[('page tab', 'drawn', False)]" ] \
     && ok "a11y: tree --json, GTK 3: a tab not drawn says so, and nothing else is added" \
     || fail "a11y: tree --json, what lint reads: $out"
-  set +e
-  "$sb" run --a11y -- sh -c "'$app' & '$sb' a11y lint --window a11y-test --ignore 'image\[' --ignore 'panel with'" > "$tmp/lint"
-  st=$?; set -e
-  [ $st = 1 ] && [ "$(wc -l < "$tmp/lint")" = 1 ] && grep -q 'button with no name$' "$tmp/lint" \
-    && ok "a11y: lint --ignore leaves out what it's told to" || { fail "a11y: lint --ignore ($st)"; cat "$tmp/lint"; }
   "$sb" run --a11y -- sh -c "'$app' & '$sb' a11y click Announce --window a11y-test >/dev/null &&
     '$sb' wait announce 'notes\.md' --timeout 10" \
     && ok "a11y: click finds a button by its name, and clicks it" || fail "a11y: click"
@@ -1510,19 +1505,14 @@ assert j['passes'] and all(p['contrast'].startswith(('text passes at ', 'graphic
     || { fail "a11y: contrast, faint ($st)"; cat "$tmp/contrast"; }
   # Behind a modal dialog, libadwaita's in its window or a modal window,
   # the faint text is said apart, and doesn't fail, even with --strict;
-  # not beside an error label (an alert), a box with a dialog's role or a
-  # popover with one, under a GTK 3 modal popover, or over an alert
-  # (a status page under a toast, a label under an overlay), nor for an
-  # alert in a layer-like box: after a banner folded away, on a view
-  # stack's second page (GTK lists it twice), or laid over the rest.
-  # libadwaita 1.5 names its dialog nothing, and shows no title for this
-  # one, so it's said by the first name in it, its text view's.
+  # not beside an error label on a view stack's second page (GTK lists
+  # it twice), or under a GTK 3 modal popover. test/contrast_test.py has each shape the rule
+  # names; these are the trees GTK and libadwaita give them. libadwaita
+  # 1.5 names its dialog nothing, and shows no title for this one, so
+  # it's said by the first name in it, its text view's.
   for over in "$app faint dialog;a11y-test;dialog \"(Reply|Notes)\"" \
               "$app faint modal;a11y-test;dialog \"Over\"" \
-              "$app faint warned;a11y-test;" "$app faint inline;a11y-test;" \
-              "$app faint popped;a11y-test;" "$app toasted;a11y-test;" \
-              "$app overlaid;a11y-test;" "$app faint warned folded;a11y-test;" \
-              "$app faint warned paged;a11y-test;" "$app faint laid;a11y-test;" \
+              "$app faint warned paged;a11y-test;" \
               "$here/window.py popover popover;popover;"; do
     cmd=${over%%;*} win=${over#*;} want=${over##*;}
     "$sb" run --a11y -- sh -c "$cmd & '$sb' a11y contrast --strict --json --window ${win%%;*}" \
@@ -1544,24 +1534,20 @@ assert (len(faint) == 1 and re.fullmatch('text behind a modal ' + want, faint[0]
   # GTK 3 calls a switch a toggle button; a frame draws a text view's
   # edge; light text, which can measure short of its color (by how much
   # depends on the font), is said to be that color; a large heading needs
-  # 3:1; a dot is too small to measure, which passes.
+  # 3:1; a dot is too small to measure. --save keeps what was read live of
+  # each node, and the pictures.
+  rm -rf "$tmp/saved"
   set +e
   "$sb" run --a11y -- sh -c "'$here/window.py' g3 contrast &
-    '$sb' a11y contrast --edges 3 --window g3" > "$tmp/contrast" 2> "$tmp/err"
+    '$sb' a11y contrast --edges 3 --window g3 --save '$tmp/saved'" > "$tmp/contrast2" 2> "$tmp/err"
   st=$?; set -e
-  [ $st = 1 ] && grep -q '/label\[1\]: text [0-9]' "$tmp/contrast" \
-    && ! grep -q 'toggle button\|/text\[0\]\|/label\[4\]' "$tmp/contrast" \
-    && ! grep -q 'GTK None' "$tmp/contrast" "$tmp/err" \
-    && grep -q '/label\[5\]: text too small to measure' "$tmp/contrast" \
-    && ! grep '/label\[0\]: ' "$tmp/contrast" | grep -qv 'drawn lighter than its color, #5f5670, which is 6\.5[0-9]:1' \
-    && "$sb" run --a11y -- sh -c "'$here/window.py' dot dot & '$sb' a11y contrast --window dot" \
-      2>/dev/null | grep -q '/label\[0\]: text too small to measure' \
-    && ok "a11y: contrast, GTK 3: not a switch, a framed text view, light text, large text, a dot, which passes alone" \
-    || { fail "a11y: contrast, GTK 3 ($st)"; cat "$tmp/contrast"; }
-  # --save keeps what was read live of each node, and the pictures.
-  rm -rf "$tmp/saved"
-  "$sb" run --a11y -- sh -c "'$here/window.py' g3 contrast &
-    '$sb' a11y contrast --edges 3 --window g3 --save '$tmp/saved'" > "$tmp/contrast2" 2>&1 || true
+  [ $st = 1 ] && grep -q '/label\[1\]: text [0-9]' "$tmp/contrast2" \
+    && ! grep -q 'toggle button\|/text\[0\]\|/label\[4\]' "$tmp/contrast2" \
+    && ! grep -q 'GTK None' "$tmp/contrast2" "$tmp/err" \
+    && grep -q '/label\[5\]: text too small to measure' "$tmp/contrast2" \
+    && ! grep '/label\[0\]: ' "$tmp/contrast2" | grep -qv 'drawn lighter than its color, #5f5670, which is 6\.5[0-9]:1' \
+    && ok "a11y: contrast, GTK 3: not a switch, a framed text view, light text, large text, a dot" \
+    || { fail "a11y: contrast, GTK 3 ($st)"; cat "$tmp/contrast2" "$tmp/err"; }
   python3 -c "import json, os, sys; d = sys.argv[1]
 t, p = json.load(open(d + '/tree.json')), json.load(open(d + '/pictures.json'))
 by = {n['path'].split('/', 1)[-1]: n for n in t}

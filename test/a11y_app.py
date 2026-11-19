@@ -2,8 +2,7 @@
 """A libadwaita window to read the accessible tree of: test/a11y_app.py
 [fixed] [notes] [trap] [dialog] [lists] [one] [unfocusable] [untitled] [second] [faint]
 [thin] [long [down]] [keys] [form] [decoys] [lines] [letter] [carousel] [nested [recheck] [pale [both]]] [split] [twin [hidden] [under]] [over [hidden] [drawn | named]] [lone] [slow] [alert]
-[freeze] [ready [late]] [modal] [warned] [inline] [popped] [toasted] [overlaid] [folded]
-[paged] [laid] [drawing] [fading]. Its icon-only button,
+[freeze] [ready [late]] [modal] [warned] [paged] [drawing] [fading]. Its icon-only button,
 its status icon and its drawing area have no accessible name unless
 `fixed`, nor has the window with `untitled`, and `second` opens an
 untitled second window; `notes` puts a text view first, which keeps Tab
@@ -46,13 +45,8 @@ given no height, as a browser gives a closed drop-down's option none, and
 an image, "Saved", which has no action; with `late`, under
 a window of the same title and size, which puts nothing in either
 anywhere, for two seconds; `modal`, a modal window over it; `warned`, an
-error label, an alert, revealed below the rest; `inline` a box with a
-dialog's role below it, and `popped` a popover with one, open;
-`toasted`, a faint label in a toast over a status page that's an alert,
-alone, and `overlaid` one laid over a label that's an alert, alone. With
-no header bar, `folded` puts it all under a banner folded away, `paged`
-on a view stack's second page, and `laid` under a layer as big as it
-holding an alert at its foot. `drawing` shows a label "Drawn: 4 tiles"
+error label, an alert, revealed below the rest. With no header bar,
+`paged` puts it all on a view stack's second page. `drawing` shows a label "Drawn: 4 tiles"
 three seconds after it starts, and `fading` has the faint label darken
 from its color to #242424 over 1.6 s, again and again.
 The Announce button says something to a screen reader (GTK 4.14+)."""
@@ -321,33 +315,12 @@ def activate(app):
             GLib.source_remove(ticking)
             cover.remove_overlay(cover.get_last_child())
         clicked["Ready"].connect("clicked", ready)
-    if "toasted" in sys.argv:
-        view = Adw.ToastOverlay(child=Adw.StatusPage(title="Could not connect",
-                                                     accessible_role=Gtk.AccessibleRole.ALERT))
-        view.add_toast(Adw.Toast(custom_title=Gtk.Label(label="Faint words",
-                                                        css_classes=["faint"]), timeout=0))
-    if "overlaid" in sys.argv:
-        view = Gtk.Overlay(child=Gtk.Label(label="Offline", accessible_role=Gtk.AccessibleRole.ALERT))
-        view.add_overlay(Gtk.Label(label="Faint words", css_classes=["faint"],
-                                   halign=Gtk.Align.START, valign=Gtk.Align.START))
-    if {"folded", "paged", "laid"} & set(sys.argv):
-        view.set_content(None)
-    if "folded" in sys.argv:
-        view = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        view.append(Adw.Banner(title="Offline", revealed=False))
-        view.append(box)
-        box.set_vexpand(True)
     if "paged" in sys.argv:
+        view.set_content(None)
         view = Adw.ViewStack()
         view.add_named(Gtk.Label(label="First page"), "first")
         view.add_named(box, "second")
         view.set_visible_child_name("second")
-    if "laid" in sys.argv:
-        view = Gtk.Overlay(child=box)
-        view.add_overlay(Gtk.Box())
-        view.get_last_child().append(Gtk.Label(
-            label="Lost connection", accessible_role=Gtk.AccessibleRole.ALERT,
-            valign=Gtk.Align.END, hexpand=True))
     w.set_content(view)
     if "slow" in sys.argv:
         def later(c, key, code, state):
@@ -391,14 +364,6 @@ def activate(app):
                 GLib.idle_add(lambda: d.present(w))
         ask.connect("response", again)
         ask.present(w)
-    if "inline" in sys.argv:
-        box.append(Gtk.Box(accessible_role=Gtk.AccessibleRole.DIALOG))
-        box.get_last_child().append(Gtk.Label(label="Find"))
-    if "popped" in sys.argv:
-        menu = Gtk.MenuButton(label="Menu", popover=Gtk.Popover(
-            accessible_role=Gtk.AccessibleRole.DIALOG, child=Gtk.Label(label="In popover")))
-        box.append(menu)
-        GLib.timeout_add(300, lambda: menu.popup() and False)
     if "warned" in sys.argv:
         box.append(Gtk.Revealer(reveal_child=True, child=Gtk.Label(
             label="Wrong password", accessible_role=Gtk.AccessibleRole.ALERT)))
