@@ -5,6 +5,7 @@ test/flicker_test.py SHOTBOX."""
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -166,6 +167,172 @@ for case, size, kw in [
     except ValueError as e:
         check(True, f"watch(): {case}: {e}")
 
+# The live fixtures' patterns (test/patterns.py), drawn offline at exact
+# times, as the live window draws them: as the watch starts, 7 ms into
+# the pattern, the tick before, then each tick, for 1.6 s.
+try:
+    import cairo
+
+    import patterns
+except ImportError:
+    cairo = None
+
+
+def render(name, args=(), start=7, seconds=1.6):
+    tick, draw = patterns.PATTERNS[name](list(args)) if isinstance(name, str) else name
+    for ms in [start] + [m for m in range(tick, start + int(seconds * 1000), tick) if m > start]:
+        surface = cairo.ImageSurface(cairo.FORMAT_RGB24, patterns.W, patterns.H)
+        draw(cairo.Context(surface), ms // tick * tick)
+        surface.flush()
+        yield (ms - start) / 1000, rgb_of(surface)
+
+
+def rgb_of(surface):
+    """A cairo RGB24 surface's pixels as RGB: each a native 32-bit word,
+    xRGB, so its bytes are B, G, R, x on a little-endian machine."""
+    data, rgb = bytes(surface.get_data()), bytearray(surface.get_width() * surface.get_height() * 3)
+    r, g, b = (2, 1, 0) if sys.byteorder == "little" else (1, 2, 3)
+    rgb[0::3], rgb[1::3], rgb[2::3] = data[r::4], data[g::4], data[b::4]
+    return bytes(rgb)
+
+
+def hex_of(r, g, b):
+    """A color as cairo draws it, rounding as it does."""
+    surface = cairo.ImageSurface(cairo.FORMAT_RGB24, 1, 1)
+    cr = cairo.Context(surface)
+    cr.set_source_rgb(r, g, b)
+    cr.paint()
+    surface.flush()
+    return "#" + rgb_of(surface).hex()
+
+
+def gray_looks(looks):
+    return all(c[1:3] == c[3:5] == c[5:7] for c in looks) and len(set(looks)) == 2
+
+
+def green_and(dark):
+    """Looks of a scene, green-led, and `dark`'s."""
+    def ok(looks):
+        g = [c for c in looks if c != dark]
+        return dark in looks and len(g) == 1 and int(g[0][3:5], 16) > max(
+            int(g[0][1:3], 16), int(g[0][5:7], 16))
+    return ok
+
+
+def near_black(looks):
+    """One look nearer black than any channel of 0x30, the other green-led."""
+    dark = [c for c in looks if max(int(c[i:i + 2], 16) for i in (1, 3, 5)) < 0x30]
+    return len(dark) == 1 and green_and(dark[0])(looks)
+
+
+# Each rule, a pattern showing it, and what it says: kind, box, changes,
+# every (as the line has it, in ms), when (s), and the looks (a set, or a
+# test of them, where a look is the mean over a scene).
+TILE30 = (53, 30, 0.023)
+
+
+def once(shape, at=1000):
+    """`shape(cr)` drawn for 40 ms from `at` ms, on gray, a picture each
+    10 ms."""
+    def draw(cr, ms):
+        cr.set_source_rgb(0.5, 0.5, 0.5)
+        cr.paint()
+        if at <= ms < at + 40:
+            shape(cr)
+    return 10, draw
+
+
+def word(cr):
+    cr.set_source_rgb(0, 0, 0)
+    cr.move_to(36, 46)
+    cr.set_font_size(14)
+    cr.show_text("Saved")
+
+
+def dots(cr):
+    """Pixels scattered over a tile."""
+    cr.set_source_rgb(1, 1, 1)
+    for i in range(24):
+        cr.rectangle(32 + i * 5 % 16, 32 + i * 7 % 16, 1, 1)
+    cr.fill()
+
+
+def square(cr):
+    cr.set_source_rgb(0, 0, 0)
+    cr.rectangle(32, 32, 32, 32)
+    cr.fill()
+
+
+if cairo is None:
+    print("skip  flicker's patterns, offline: no pycairo")
+    if os.environ.get("SHOTBOX_CAIRO") == "required":
+        check(False, "flicker's patterns, offline: SHOTBOX_CAIRO=required, but no pycairo")
+else:
+    LEAF, NONE = hex_of(0, 0.6, 0), "#000000"
+    for rule, pattern, want in [
+        ("flicker: A, B, A, B, each held no longer than --brief, --times changes or more",
+         "flip 30", [("flicker", "200x120+0+0", *TILE30, {NONE, LEAF})]),
+        ("a flash: A, then B for a picture, then A, held longer than --brief either side",
+         "flash 40", [("flash", "200x120+0+0", 2, 40, 0.993, {LEAF, NONE})]),
+        ("flicker: black between frames of a scene, the same each time", "strip",
+         [("flicker", "200x120+0+0", *TILE30, {LEAF, NONE})]),
+        ("flicker: black between frames of a scene moved on each time (bzflag's strip)",
+         "scene", [("flicker", "200x120+0+0", *TILE30, green_and(NONE))]),
+        ("flicker: a band of three columns at a tile's edge, beside still text", "band 3",
+         [("flicker", "16x120+176+0", *TILE30, green_and(NONE))]),
+        ("flicker: a band of one column", "band 1",
+         [("flicker", "16x120+176+0", *TILE30, green_and(NONE))]),
+        ("flicker: its black a dark gray with noise in it", "noisy",
+         [("flicker", "200x120+0+0", *TILE30, near_black)]),
+        ("flicker: with something passing through most of its tile", "passer",
+         [("flicker", "16x120+176+0", *TILE30, {hex_of(0.53, 0.79, 0), NONE})]),
+        ("flicker: beside a scene moving on all along", "busy",
+         [("flicker", "16x120+176+0", *TILE30, near_black)]),
+        ("flicker: over plain gray, beside a square changing", "edge",
+         [("flicker", "16x120+176+0", *TILE30, {hex_of(0.2, 0.6, 0.2), NONE})]),
+        ("flicker: two grays 6% apart", "gray",
+         [("flicker", "200x120+0+0", *TILE30, {hex_of(0.5, 0.5, 0.5), hex_of(0.56, 0.56, 0.56)})]),
+        # Stripes 12 across on tiles 16 across: a tile at 16, 64, 112 or
+        # 160 holds as much of each look, the same mean, and isn't seen.
+        ("flicker: stripes swapping, each the other moved across, not scrolling", "grating",
+         [("flicker", box, *TILE30, gray_looks) for box in (
+             "16x120+0+0", "32x120+32+0", "32x120+80+0", "32x120+128+0", "24x120+176+0")]),
+        ("a flash: a panel white, beside a caret blinking and a spinner turning", "panel",
+         [("flash", "64x64+32+32", 2, 40, 0.993, {hex_of(0.3, 0.3, 0.3), hex_of(1, 1, 1)})]),
+        ("a flash: an X of strokes, one color where it differs", "icon",
+         [("flash", "16x16+64+48", 2, 40, 0.993, {hex_of(0.3, 0.3, 0.3), hex_of(1, 1, 1)})]),
+        ("not either: a square moving through", "move", []),
+        ("not either: a square through a tile in a picture or two", "fast", []),
+        ("not either: a square stepping past tiles, to a sliver at the edge", "skip", []),
+        ("not either: text scrolling past", "scroll", []),
+        ("not either: text scrolled by halves of a pixel", "smooth", []),
+        ("not either: text scrolled smoothly, spaced", "spaced", []),
+        ("not either: a listing's lines", "text", []),
+        ("not either: pages of text, blanks between", "pages", []),
+        ("not either: a line's steps crawling", "line", []),
+        ("not either: an edge between two faces 8% apart sweeping past", "gradient", []),
+        ("not either: two poles alike crossing", "poles", []),
+        ("not a flash: a line missing for a picture", "dropout", []),
+        ("not a flash: a line's step a row lower for a picture", "stair", []),
+        ("not a flash: a terminal's page drawn anew, its caret gone with it", "redraw", []),
+        # Shown from 1560 ms to 1600, 7 ms before the watch ends.
+        ("not a flash: one whose look after isn't seen held, the watch ended", once(square, 1560),
+         []),
+        ("not a flash: a word shown for a picture, not one color where it differs", once(word),
+         []),
+        ("not a flash: dots shown for a picture, one color but not a shape", once(dots), []),
+    ]:
+        name, *args = pattern.split() if isinstance(pattern, str) else (pattern,)
+        pattern = pattern if isinstance(pattern, str) else "drawn here"
+        found, _, _ = watch(render(name, args), (patterns.W, patterns.H), 1.6)
+        got = [(f["kind"], f["box"], f["changes"], round(f["every"] * 1000), round(f["at"], 3),
+                f["looks"]) for f in found]
+        ok = len(got) == len(want) and all(
+            g[:5] == w[:5] and (w[5](g[5]) if callable(w[5]) else set(g[5]) == w[5])
+            for g, w in zip(got, want))
+        check(ok, f"{rule} ({pattern})" + ("" if ok else f": want {[w[:5] for w in want]}, "
+                                                          f"got {got}"))
+
 # flicker --from a directory written by hand: what --frames keeps.
 sb = sys.argv[1]
 tmp = Path(tempfile.mkdtemp())
@@ -281,5 +448,25 @@ for flag in (["--window", "w"], ["--window", ""], ["--crop", ""], ["--crop", "1x
     st, out, err = cli(kept(TWO), *flag)
     check(st == 2 and "takes no --window, --crop, --seconds or --frames" in err,
           f"flicker --from: no {flag[0]} ({err!r})")
+
+if cairo is not None:
+    # As the command says it, with its sheet, kept and looked at again.
+    for pattern, line in [("flip 30", r"flicker: 200x120\+0\+0, 53 changes, every 30 ms, "
+                                      r"(#000000 and #009900|#009900 and #000000), from 0\.023s, "
+                                      r"shown in "),
+                          ("flash 40", r"flash: 200x120\+0\+0, #000000 for 40 ms in #009900, "
+                                       r"at 0\.993s, shown in ")]:
+        name, *args = pattern.split()
+        d, sheets = Path(tempfile.mkdtemp(dir=tmp)), Path(tempfile.mkdtemp(dir=tmp))
+        drawn = list(render(name, args))
+        shots = [(at, zlib.compress(rgb)) for at, rgb in drawn]
+        changed = 1 + sum(a[1] != b[1] for a, b in zip(drawn, drawn[1:]))
+        flicker.keep(d, shots, (patterns.W, patterns.H), 1.6, len(shots))
+        st, out, err = cli(d, "--save", str(sheets))
+        ok = (st == 1 and len(out) == 2 and re.match(line, out[0]) is not None
+              and [str(f) for f in sheets.iterdir()] == [out[0].rpartition("shown in ")[2]]
+              and out[1] == f"watched 1.6 s, {len(shots)} pictures, {len(shots) / 1.6:.0f} a second, "
+                            f"{changed} changed")
+        check(ok, f"flicker --from, a kept {pattern}: its line, and its sheet ({st}, {out}, {err!r})")
 
 sys.exit(bool(fails))

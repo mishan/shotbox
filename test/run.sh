@@ -975,30 +975,19 @@ for c in "silent:never called mutated()" "unseen:didn't both find button \"Two\"
 done
 
 #: part input
-# flicker: a square switching green and black every 30 ms flickers, at
-# that; one that blinks every half second, as a caret does, doesn't; one
-# black for 40 ms, once a second, flashed; one black between frames of a
-# scene, the same or moved on each time (bzflag's strip), or a band of
-# three columns at a tile's edge doing that beside still text, or one,
-# flickers, said in the band's own colors, and so does a strip whose black
-# is a dark gray with noise in it, one with something passing through most
-# of its tile, one beside a scene moving on all along, and one over plain
-# gray beside a square changing, two grays 6% apart, and stripes
-# swapping, each the other moved across, not scrolling; an X flashing
-# white flashes; and a still window, a moving square, slowly or through
-# a tile in a picture or stepping past tiles to a sliver of it at the
-# edge, text scrolling past, close, by halves of a pixel, or spaced, a
-# listing's lines, or pages of them between blanks, a line's steps
-# crawling, an edge between two
-# faces 8% apart sweeping past, two poles alike crossing, a line missing
-# for a picture or a step of it a row lower, and a terminal's page drawn
-# anew, its caret gone with it, none; and a panel with a word in it flashing
-# white, beside a caret and a spinner, flashes. Each one's sheet is in
-# --save's directory, named in its line by what it is, of a size to see,
-# and nothing else is; the flash's three pictures, one above another, a
-# border above and below each; and without --save, none is said.
+# flicker, live, on what only a live watch shows: a square switching green
+# and black every 30 ms, which flickers; one black for 40 ms once a
+# second, a flash; GTK's own entry, its caret blinking, which is neither;
+# text scrolling past, drawn every 16 ms; and an X of strokes flashing
+# white for 40 ms, drawn every 10 ms, which the capture must keep up
+# with. The rest of what flicker tells apart is drawn offline, at exact
+# times, in test/flicker_test.py. Each one's sheet is in --save's
+# directory, named in its line by what it is, of a size to see, and
+# nothing else is; the flash's three pictures, one above another, a
+# border above and below each. And --from what --frames kept says what
+# the live watch did, outside the session.
 sheets() {
-  [ -d "$1" ] || { echo "$2" | grep -q '^fl.*, from [0-9.]*s$' && ! echo "$2" | grep -q "shown in"; return; }
+  [ -d "$1" ] || return 1
   echo "$2" | sed -n 's/^\(fl[a-z]*\): \([^,]*\),.*, shown in \(.*\)/\1 \2 \3/p' > "$tmp/sheets"
   [ "$(ls "$1" | wc -l)" = "$(wc -l < "$tmp/sheets")" ] || return 1
   while read -r kind box sheet; do
@@ -1007,39 +996,40 @@ sheets() {
       || return 1
   done < "$tmp/sheets"
 }
-flickered=""
-for c in "flip 30 1 ^flicker: 200x120[+]0[+]0, .* every [1-5][0-9] ms, (#000000 and #009900|#009900 and #000000)" "flip 500 0" \
-         "flash 40 1 ^flash: 200x120[+]0[+]0, #000000 for [3-6][0-9] ms in #009900" "still - 0" \
-         "move - 0" "scroll - 0" "smooth - 0" "spaced - 0" "strip - 1 ^flicker: 200x120[+]0[+]0, .* ms, #00.* and #00" \
-         "scene - 1 ^flicker: 200x120[+]0[+]0, .* every [1-5][0-9] ms" \
-         "band 3 1 ^flicker: 16x120[+]176[+]0, .* every [1-5][0-9] ms, .*#000000" \
-         "band 1 1 ^flicker: 16x120[+]176[+]0, " "noisy - 1 ^flicker: 200x120[+]0[+]0, .* every [1-5][0-9] ms" \
-         "fast - 0" "panel - 1 ^flash: .*, #ffffff for [2-6][0-9] ms in " "text - 0" "pages - 0" \
-         "line - 0" "gradient - 0" "passer - 1 ^flicker: 16x120[+]176[+]0, " "skip - 0" \
-         "grating - 1 ^flicker: 16x120[+]0[+]0, .* every [1-5][0-9] ms" \
-         "edge - 1 ^flicker: 16x120[+]176[+]0, " "gray - 1 ^flicker: 200x120[+]0[+]0, " "poles - 0" \
-         "busy - 1 ^flicker: 16x120[+]176[+]0, " "icon - 1 ^flash: 16x16[+]64[+]48, #ffffff" \
-         "dropout - 0" "redraw - 0" "stair - 0"; do
+for c in "flip 30 1 ^flicker: 200x120[+]0[+]0, .* every [1-5][0-9] ms, (#000000 and #009900|#009900 and #000000)" \
+         "flash 40 1 ^flash: 200x120[+]0[+]0, #000000 for [3-6][0-9] ms in #009900" "still - 0" "scroll - 0" \
+         "icon - 1 ^flash: 16x16[+]64[+]48, #ffffff"; do
   set -f; set -- $c; set +f
   pat=; [ $# -le 3 ] || pat=${c#"$1 $2 $3 "}
-  save="--save '$tmp/fl-$1-$2'"; [ $1 != gray ] || save=
-  set +e; out=$("$sb" run -- sh -c "'$here/window.py' fl $1 $2 & '$sb' wait window fl >/dev/null &&
-    '$sb' flicker --window fl --seconds 1.6 $save"); st=$?; set -e
-  [ $st = "$3" ] && { [ -z "$pat" ] || echo "$out" | grep -Eq "$pat"; } && sheets "$tmp/fl-$1-$2" "$out" \
-    && { [ "$1" != flash ] || [ "$(convert "$tmp"/fl-flash-40/*.png -crop 1x+1+0 -depth 8 txt:- \
+  d=$tmp/kept-$1 sh=$tmp/fl-$1-$2 what=$1; [ "$2" = - ] || what="$1 $2"
+  set +e; "$sb" run -- sh -c "'$here/window.py' fl $1 $2 & '$sb' wait window fl >/dev/null &&
+    '$sb' flicker --window fl --seconds 1.6 --save '$sh' --frames '$d'" > "$d.out" 2> "$d.err"; st=$?
+  set -e
+  [ $st = "$3" ] && { [ -z "$pat" ] || grep -Eq "$pat" "$d.out"; } && sheets "$sh" "$(cat "$d.out")" \
+    && { [ "$1" != flash ] || [ "$(convert "$sh"/*.png -crop 1x+1+0 -depth 8 txt:- \
                                    | grep -c '#7F7F7F')" = 6 ]; } \
-    || flickered="$flickered $1 $2 ($st: $out)"
+    && ok "flicker, live: $what, and a sheet of what it found" \
+    || { fail "flicker, live: $what ($st)"; cat "$d.out" "$d.err"; }
+  # Its sheets in a directory of their own, the lines the same but for it.
+  set +e; env -u DISPLAY -u WAYLAND_DISPLAY "$sb" flicker --from "$d" --save "$sh-from" \
+    > "$d.from" 2> "$d.ferr"; from=$?
+  set -e
+  sed -i "s#$sh-from/#$sh/#" "$d.from"
+  [ $from = $st ] && cmp -s "$d.out" "$d.from" && cmp -s "$d.err" "$d.ferr" \
+    && ok "flicker --from says what the live watch that kept it did ($1)" \
+    || { fail "flicker --from, against live ($1: $st, $from)"
+         { diff "$d.out" "$d.from"; diff "$d.err" "$d.ferr"; } || true; }
 done
-[ -z "$flickered" ] && ok "flicker: switching every 30 ms, not every 500; a flash; a strip; not a still window, motion, scrolling, a line or an edge; a sheet of each" \
-  || fail "flicker:$flickered"
 # --frames keeps the watch: each picture that changed, a PNG of what's
 # watched, at its time, in order, and how many were taken; a directory
-# that isn't empty is refused before watching.
+# that isn't empty is refused before watching. Without --save, no sheet
+# is said.
 set +e; "$sb" run -- sh -c "'$here/window.py' fl flip 30 & '$sb' wait window fl >/dev/null &&
   '$sb' flicker --window fl --seconds 1.6 --frames '$tmp/watched'" > "$tmp/watched.out"; st=$?
 "$sb" run -- sh -c "'$sb' flicker --seconds 1.6 --frames '$tmp/watched'" > /dev/null 2> "$tmp/watched.err"; again=$?
 set -e
 [ $st = 1 ] && [ $again = 2 ] && grep -q "isn't empty" "$tmp/watched.err" \
+  && grep -q '^flicker: .*, from [0-9.]*s$' "$tmp/watched.out" \
   && python3 -c "import json, subprocess, sys; d = sys.argv[1]; m = json.load(open(d + '/frames.json'))
 f = m['frames']; ats = [x['at'] for x in f]
 assert m['version'] == 1 and m['seconds'] == 1.6 and m['size'] == [200, 120], m
@@ -1049,19 +1039,6 @@ sizes = subprocess.run(['identify', '-format', '%w %h\n', *(d + '/' + x['file'] 
 assert set(sizes) == {'200 120'} and len(sizes) == len(f), sizes" "$tmp/watched" \
   && ok "flicker --frames keeps each picture that changed, and when; not over another watch" \
   || { fail "flicker --frames ($st, $again)"; cat "$tmp/watched.out" "$tmp/watched.err"; ls "$tmp/watched" | head || true; }
-# --from what --frames kept says what the live watch did, outside the
-# session: a square flickering, one flashing, and a still window.
-for c in "flip 30 1" "flash 40 1" "still - 0"; do
-  set -- $c; d=$tmp/kept-$1
-  set +e; "$sb" run -- sh -c "'$here/window.py' fl $1 $2 & '$sb' wait window fl >/dev/null &&
-    '$sb' flicker --window fl --seconds 1.6 --frames '$d'" > "$d.out" 2> "$d.err"; st=$?
-  env -u DISPLAY -u WAYLAND_DISPLAY "$sb" flicker --from "$d" > "$d.from" 2> "$d.ferr"; from=$?
-  set -e
-  [ $st = "$3" ] && [ $from = $st ] && cmp -s "$d.out" "$d.from" && cmp -s "$d.err" "$d.ferr" \
-    && ok "flicker --from says what the live watch that kept it did ($1)" \
-    || { fail "flicker --from, against live ($1: $st, $from)"
-         { diff "$d.out" "$d.from"; diff "$d.err" "$d.ferr"; } || true; }
-done
 # A script's steps are checked before any plays: a kept watch read, but
 # no --save made, and one that isn't there stops the script.
 printf 'flicker --from %s --save %s\nflicker --from %s\n' "$tmp/kept-flip" "$tmp/play-sheets" \
