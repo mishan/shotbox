@@ -1615,20 +1615,33 @@ EOF
            { diff "$d.out" "$d.from"; diff "$d.err" "$d.ferr"; } || true; }
   done
   # What's typed in a field, which GTK 4's search reads to tell text
-  # apart, and what tells it, are kept in fields.json alone.
+  # apart, and what tells it, are kept in fields.json alone. From 4.14.6,
+  # where a label's text can be takes in the entry under it, its text is
+  # read; before, only its place.
   "$sb" run --a11y -- sh -c "'$app' twin & '$sb' wait window a11y-test >/dev/null
     '$sb' a11y contrast --window a11y-test --save '$tmp/saved-field'" >/dev/null 2>&1 || true
-  python3 - "$tmp/saved-field" <<'PY' && ok "a11y: contrast --save keeps what's typed in a field, and what tells it, only in fields.json" \
-    || fail "a11y: contrast --save, what's typed in a field"
-import json, sys
+  set +e
+  python3 - "$tmp/saved-field" <<'PY'
+import json, re, sys
 d = sys.argv[1]
-fields = {n["path"] for n in json.load(open(d + "/tree.json")) if "editable" in n["states"]}
+tree = json.load(open(d + "/tree.json"))
+fields = {n["path"] for n in tree if "editable" in n["states"]}
 g, s, f = (json.load(open(f"{d}/{name}.json")) for name in ("gtk4", "shapes", "fields"))
 typed = {t for p in fields for t in f["reads"]["texts"].get(p, [])}
-assert "Twin" in typed and any(x["text"] == "Twin" for x in f["shapes"]), f
+assert fields and any(p in fields for r in f["reads"].values() for p in r), f
 assert not any(p in fields for r in g["reads"].values() for p in r), g
 assert not any(x["text"] in typed for x in s["shapes"]), [x["text"] for x in s["shapes"]]
+if tuple(map(int, re.findall(r"\d+", tree[0]["toolkit"]))) < (4, 14, 6):
+    sys.exit(3)
+assert "Twin" in typed and any(x["text"] == "Twin" for x in f["shapes"]), f
 PY
+  st=$?; set -e
+  case $st in
+    0) ok "a11y: contrast --save keeps what's typed in a field, and what tells it, only in fields.json" ;;
+    3) ok "a11y: contrast --save keeps a field's reads only in fields.json"
+       echo "skip  a11y: contrast --save, what's typed in a field: GTK 4 before 4.14.6 doesn't read it" ;;
+    *) fail "a11y: contrast --save, what's typed in a field" ;;
+  esac
   # A faint label dark half a second in two is changing, whenever the
   # first picture's taken, and with --strict fails; dark words sliding by
   # pass, though they've moved out of where they were first seen.
