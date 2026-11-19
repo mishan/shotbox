@@ -2207,7 +2207,9 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
     unworded = (controls - {"link"}) | images
     parents = {n.path: n for n in nodes}
     ids = {n.get("_id"): n for n in nodes}
-    layers = {}
+    # What GTK 4's text search reads of the tree live, each by its node's
+    # path, as it's asked for.
+    reads = {k: {} for k in ("relative", "pages", "fonts", "laid", "paged", "popups", "texts")}
 
     def within(path, outer):
         return path == outer or path.startswith(outer + "/")
@@ -2383,27 +2385,31 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
                 break
         else:
             return False
-        try:
-            e = n._acc.get_extents(Atspi.CoordType.WINDOW)
-            got = n._top.get_accessible_at_point(e.x + e.width // 2, e.y + e.height // 2,
-                                                 Atspi.CoordType.WINDOW)
-        except Exception:   # gone since the walk
-            return False
-        o = got and ids.get(f"{got.app.bus_name if got.app else ''}{got.path}")
+        if n.path not in reads["paged"]:
+            try:
+                e = n._acc.get_extents(Atspi.CoordType.WINDOW)
+                got = n._top.get_accessible_at_point(e.x + e.width // 2, e.y + e.height // 2,
+                                                     Atspi.CoordType.WINDOW)
+                o = got and ids.get(f"{got.app.bus_name if got.app else ''}{got.path}")
+                reads["paged"][n.path] = o.path if o else None
+            except Exception:   # gone since the walk
+                reads["paged"][n.path] = None
+        o = parents.get(reads["paged"][n.path])
         stack = page.rsplit("/", 1)[0]
         return bool(o) and not within(o.path, page) and (
             within(o.path, stack) or within(stack, o.path))
 
     def popped(n):
         """Whether `n` is in a popover, or is one."""
-        path = n.path
+        path, popups = n.path, reads["popups"]
         while "/" in path:
-            if path not in layers:
+            # A window's title can hold a "/": a path that's no node's.
+            if path in parents and path not in popups:
                 try:
-                    layers[path] = parents[path]._acc.get_layer() == Atspi.ComponentLayer.POPUP
+                    popups[path] = parents[path]._acc.get_layer() == Atspi.ComponentLayer.POPUP
                 except Exception:   # no bounds: a stack's page
-                    layers[path] = False
-            if layers[path]:
+                    popups[path] = False
+            if popups.get(path):
                 return True
             path = path.rsplit("/", 1)[0]
         return False
@@ -2470,10 +2476,9 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
     unseen_controls, failed = [], []   # the problems whose lines need more read live
     uncounted = set()   # what's measured only by its pictures, if at all
     trusted = os.environ.get("SHOTBOX_TRUST_GTK4_BOUNDS") == "1"
-    rel = {}
-
     def relative(n):
         """`n`'s extents in its parent's, as GTK says them."""
+        rel = reads["relative"]
         if n.path not in rel:
             try:
                 e = n._acc.get_extents(Atspi.CoordType.PARENT)
@@ -2482,7 +2487,14 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
                 rel[n.path] = None
         return rel[n.path]
 
-    areas, fonts, drawings, lays, refused, aparts, doubt, both = {}, {}, {}, {}, {}, {}, {}, {}
+    def lone_child(up):
+        """Whether `up` has one child and no actions, as a stack's page."""
+        if up.path not in reads["pages"]:
+            reads["pages"][up.path] = (up._acc.get_child_count() == 1
+                                       and "Action" not in up._acc.get_interfaces())
+        return reads["pages"][up.path]
+
+    areas, drawings, refused, aparts, doubt, both = {}, {}, {}, {}, {}, {}
     groups, anchors, votes, sought = {}, {}, {}, set()
 
     def spare(up, child, sizes=True):
@@ -2497,8 +2509,7 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
         # A page: not a widget, so no actions, with its child's extents.
         # Its child is placed from it, counted twice, unless GTK sums
         # past the page, as for libadwaita 1.5's view stack.
-        if (mine == its and up._acc.get_child_count() == 1
-                and "Action" not in up._acc.get_interfaces() and child.bounds and up.bounds
+        if (mine == its and lone_child(up) and child.bounds and up.bounds
                 and child.bounds[:2] == [up.bounds[0] + its[0], up.bounds[1] + its[1]]):
             return "page"
         if not sizes:
@@ -2553,6 +2564,7 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
         return bool(area) and not all(area[2:])
 
     def font(n):
+        fonts = reads["fonts"]
         if n.path not in fonts:
             try:
                 attrs, _, end = Atspi.Text.get_attribute_run(n._acc, 0, True)
@@ -2573,6 +2585,8 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
         """What `o` may draw: its name, unless it's a label's it's named by,
         and what's in it, if it's edited or a label, whose name can be set
         to other than what it draws."""
+        if o.path in reads["texts"]:
+            return reads["texts"][o.path]
         got = []
         if o.name and not any(t.get_name() == o.name
                               for t in related(Atspi, o._acc, "LABELLED_BY")):
@@ -2586,7 +2600,8 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
             got.append((o._acc.get_attributes() or {}).get("placeholder-text", ""))
         except Exception:   # gone since the walk
             pass
-        return list(dict.fromkeys(t for t in got if t))
+        reads["texts"][o.path] = list(dict.fromkeys(t for t in got if t))
+        return reads["texts"][o.path]
 
     def as_wide(n, shape):
         """Whether the text GTK lays out for `n` is as wide as its name drawn
@@ -2619,6 +2634,7 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
         """Where GTK lays out `n`'s text in its own box, (x, y, width), from
         4.14.6 (before, it doesn't say); or None, as for one character
         from 4.22.3, whose range is empty, at the box's corner."""
+        lays = reads["laid"]
         if n.path not in lays:
             lays[n.path] = None
             if gtk4_release(n) >= (4, 14, 6):
@@ -2754,7 +2770,7 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
             if not there or not all(overlap(there, box)[2:]):
                 continue
             for t in texts_of(o):
-                if time.monotonic() > until:
+                if until.past():
                     raise TimeoutError
                 other = drawing(t, font(o) or attrs)
                 # A shorter text inside this one can't match all of it, if
@@ -2930,7 +2946,7 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
             n["_drawn"] = False
     found, late, hidden = {}, set(), set()
     cannot = None
-    until = time.monotonic() + SEARCH
+    until = picture.Deadline(SEARCH)
     for n in measured:
         if searched(n) and leaf(n) and n.path not in fronts:
             cannot = cannot or pango_cairo()
@@ -3084,7 +3100,7 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
         boxes = {(dx, dy): [b[0] + dx, b[1] + dy, *b[2:]] for dx in xs for dy in ys}
         got = set()
         for d, o in boxes.items():
-            if time.monotonic() > until:
+            if until.past():
                 return f"not looked for, past the {SEARCH:g} seconds given to looking"
             if picture.drawn_at(pic, o):
                 got.add(d)
