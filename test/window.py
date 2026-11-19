@@ -146,28 +146,31 @@ elif sys.argv[2:] == ["alert"]:
         box.add(widget)
     w.add(box)
 elif sys.argv[2:3] and sys.argv[2] in patterns.PATTERNS:
-    # flicker's patterns, as they are at each tick from when the window was
-    # made, as test/flicker_test.py draws them: a tick is drawn before the
-    # next is taken, so a late timer, or GTK late to paint, shows it late
-    # rather than skipping it, and the next is set for its own time, so
-    # GLib's timers don't drift. But for one shorter than GTK paints a
-    # frame (17 ms at 60 Hz), which no program can show each of.
-    area, began, at, drawn = Gtk.DrawingArea(), GLib.get_monotonic_time(), [0], [False]
+    # flicker's patterns, tick by tick from when the window was made, as
+    # test/flicker_test.py draws them. A tick is shown as long as it
+    # lasts from when GTK paints it, so a late paint stretches it rather
+    # than cutting it short or skipping it. But for one shorter than GTK
+    # paints a frame (17 ms at 60 Hz), which no program can show each of:
+    # those follow the clock.
+    area, began, at, timed = Gtk.DrawingArea(), GLib.get_monotonic_time(), [0], [None]
     tick, paint = patterns.PATTERNS[sys.argv[2]](sys.argv[3:])
+
+    def step():
+        at[0] += tick
+        area.queue_draw()
+        if tick < 20:
+            late = (GLib.get_monotonic_time() - began) // 1000 - at[0]
+            GLib.timeout_add(max(1, tick - late), step)
+        return False
 
     def draw(a, cr):
         paint(cr, at[0])
-        drawn[0] = True
+        if tick >= 20 and timed[0] != at[0]:
+            timed[0] = at[0]
+            GLib.timeout_add(tick, step)
     area.connect("draw", draw)
-
-    def step():
-        if drawn[0] or tick < 20:
-            at[0], drawn[0] = at[0] + tick, False
-            area.queue_draw()
-        late = (GLib.get_monotonic_time() - began) // 1000 - at[0]
-        GLib.timeout_add(max(1, tick - late), step)
-        return False
-    GLib.timeout_add(tick, step)
+    if tick < 20:
+        GLib.timeout_add(tick, step)
     w.add(area)
 elif sys.argv[2:3] == ["slow"]:
     late = int(sys.argv[3])
