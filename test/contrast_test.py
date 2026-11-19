@@ -3,6 +3,7 @@
 rule says: no display, accessibility bus or PyGObject (its import is
 blocked): test/contrast_test.py SHOTBOX."""
 
+import base64
 import json
 import os
 import subprocess
@@ -62,10 +63,13 @@ def window(toolkit="gtk 3.24.49", **more):
                 **{"bounds": [0, 0, 200, 100], "window": [0, 0, 200, 100], **more})
 
 
-def contrast(nodes, screen, *args, samples=(), hovers=(), pictures=None, tree=None):
+def contrast(nodes, screen, *args, samples=(), hovers=(), pictures=None, tree=None, files=()):
     """contrast --from a directory of `nodes`, the `screen` picture,
-    `samples` (Pic, x, y) and `hovers` (box, Pic): (status, lines, stderr)."""
+    `samples` (Pic, x, y), `hovers` (box, Pic) and `files` (name, JSON):
+    (status, lines, stderr)."""
     d = Path(tempfile.mkdtemp(dir=tmp))
+    for name, o in files:
+        (d / name).write_text(o if isinstance(o, str) else json.dumps(o))
     (d / "tree.json").write_text(tree if tree is not None else json.dumps(nodes))
     screen.save(d / "picture.png")
     for i, (p, _, _) in enumerate(samples, 1):
@@ -274,6 +278,96 @@ for case, more, kw, want in [
 ]:
     got = behind(*more, **kw)
     check(got == want, f"contrast --from: behind a modal dialog: {case}" + ("" if got == want else f": {got}"))
+
+# GTK 4's, from what the live run read and drew: its text looked for in
+# the box GTK 4.14 to 4.14.5 says, where it's drawn, by its shape.
+def shape(w, h):
+    """The coverage of Pic.text's strokes in a box `w` by `h`, as
+    text_shapes() draws text: with two blank columns each side."""
+    cover = bytearray((w + 4) * h)
+    for i in range(2, w - 4, 6):
+        for y in range(2, max(h - 2, 3)):
+            cover[y * (w + 4) + i + 2:y * (w + 4) + i + 5] = b"\xff" * 3
+    return [w + 4, h, base64.b64encode(cover).decode()]
+
+
+ATTRS = {"family-name": "Sans", "size": "11", "run-end": "2"}
+G4 = [window(toolkit="GTK 4.14.0"), label()]
+DRAWN = Pic().text([14, 12, 40, 14], (0x99,) * 3)
+
+
+def gtk4(gone=None, raised=True, **reads):
+    return {"version": 1, "trusted": False, "cannot": None, "raised": raised, "gone": gone,
+            "reads": {"relative": {}, "pages": {}, "fonts": {"frame/label[0]": ATTRS},
+                      "laid": {"frame/label[0]": None},
+                      "paged": {}, "popups": {"frame/label[0]": False}, "texts": {}, **reads}}
+
+
+SHAPES = {"version": 1, "shapes": [{"text": "Hi", "attrs": ATTRS, "dy": 0, "kinds": [[shape(40, 14)]]}]}
+for case, files, want in [
+    ("found where it's drawn in its box", [("gtk4.json", gtk4()), ("shapes.json", SHAPES)],
+     (1, ["frame/label[0]: text 2.84:1, #999999 on #ffffff (at least 4.5); found 4,2 px from "
+          "the corner of the box GTK 4.14.0 says"])),
+    ("out of time where the live run was", [("gtk4.json", gtk4(gone=1)), ("shapes.json", SHAPES)],
+     (2, ["frame/label[0]: text not measured: no time left to look for it"])),
+]:
+    got = contrast(G4, DRAWN, files=files)
+    check(got[:2] == want, f"contrast --from, GTK 4: {case}" + ("" if got[:2] == want else f": {got}"))
+
+# A field whose text is drawn where the label's is found, which then can't
+# be told for the label's: what's typed, its font and its shape, from
+# fields.json. Not raised, the label is a note, which says why.
+FIELD = node("frame/text[1]", "text", "Notes", ["editable"], bounds=BOX)
+TYPED = {"version": 1, "reads": dict({k: {} for k in gtk4()["reads"]}, fonts={"frame/text[1]": ATTRS},
+                                     texts={"frame/text[1]": ["Wisteria"]}),
+         "shapes": [{"text": "Wisteria", "attrs": ATTRS, "dy": 0, "kinds": [[shape(40, 14)]]}]}
+st, out, err = contrast(G4 + [FIELD], DRAWN, files=[("gtk4.json", gtk4(raised=False)),
+                                                    ("shapes.json", SHAPES), ("fields.json", TYPED)])
+check(st == 2 and out == ['frame/label[0]: text not measured: GTK 4 reports its position wrong (another '
+                          'node\'s text matches there too: the text "Notes", whose text is "Wisteria")'],
+      f"contrast --from, GTK 4: a field's text, from fields.json, matching where the label's is ({st}, {out})")
+st, out, err = contrast(G4 + [FIELD], DRAWN, files=[("gtk4.json", gtk4(raised=False)),
+                                                    ("shapes.json", SHAPES)])
+check(st == 2 and not out and "frame/text[1]'s texts" in err,
+      f"contrast --from, GTK 4: a field's text, without fields.json, not read ({st}, {out}, {err!r})")
+
+for case, files, said in [
+    ("a read the live run didn't make", [("gtk4.json", gtk4(fonts={})), ("shapes.json", SHAPES)],
+     "the saved run didn't read frame/label[0]'s font"),
+    ("a shape it didn't draw", [("gtk4.json", gtk4()), ("shapes.json", {"version": 1, "shapes": []})],
+     "the saved run didn't read a text's shape"),
+    ("gtk4.json, not JSON", [("gtk4.json", "{"), ("shapes.json", SHAPES)], "isn't what contrast --save writes"),
+    ("gtk4.json of another version", [("gtk4.json", dict(gtk4(), version=2)), ("shapes.json", SHAPES)],
+     "isn't what contrast --save writes"),
+    ("a read of a node not in the tree", [("gtk4.json", gtk4(popups={"frame/label[9]": False})),
+                                          ("shapes.json", SHAPES)], "isn't what contrast --save writes"),
+    ("a read of the wrong type", [("gtk4.json", gtk4(relative={"frame/label[0]": "near"})),
+                                  ("shapes.json", SHAPES)], "isn't what contrast --save writes"),
+    ("no shapes.json", [("gtk4.json", gtk4())], "can't read"),
+    ("a shape not as big as it says", [("gtk4.json", gtk4()), ("shapes.json", {"version": 1, "shapes": [
+        {"text": "Hi", "attrs": ATTRS, "dy": 0, "kinds": [[[44, 14, "AAAA"]]]}]})],
+     "shapes.json isn't what contrast --save writes"),
+    ("a node at a middle that isn't a path", [("gtk4.json", gtk4(paged={"frame/label[0]": []})),
+                                              ("shapes.json", SHAPES)], "isn't what contrast --save writes"),
+    ("shapes.json, not an object", [("gtk4.json", gtk4()), ("shapes.json", [1])],
+     "isn't what contrast --save writes"),
+    ("a shape with no kinds", [("gtk4.json", gtk4()), ("shapes.json", {"version": 1, "shapes": [
+        {"text": "Hi", "attrs": ATTRS, "dy": 0}]})], "isn't what contrast --save writes"),
+    ("fields.json with no shapes", [("gtk4.json", gtk4()), ("shapes.json", SHAPES),
+                                    ("fields.json", {"version": 1, "reads": gtk4()["reads"]})],
+     "isn't what contrast --save writes"),
+    ("a field's shape not as big as it says", [("gtk4.json", gtk4()), ("shapes.json", SHAPES), (
+        "fields.json", {"version": 1, "reads": {k: {} for k in gtk4()["reads"]}, "shapes": [
+            {"text": "Hi", "attrs": ATTRS, "dy": 0, "kinds": [[[44, 14, "AAAA"]]]}]})],
+     "fields.json isn't what contrast --save writes"),
+    ("a read in both gtk4.json and fields.json", [("gtk4.json", gtk4()), ("shapes.json", SHAPES), (
+        "fields.json", {"version": 1, "reads": dict({k: {} for k in gtk4()["reads"]},
+                                                    fonts={"frame/label[0]": ATTRS}), "shapes": []})],
+     "fields.json isn't what contrast --save writes"),
+]:
+    st, out, err = contrast(G4, DRAWN, files=files)
+    check(st == 2 and not out and said in err and "Traceback" not in err,
+          f"contrast --from, GTK 4: {case}, said ({st}, {out}, {err!r})")
 
 # --json, as the live one has it: no depth, pid or what was read live.
 st, out, _ = contrast([W, label(large=True, color="#555555")], FAINT, "--json")

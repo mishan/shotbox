@@ -889,19 +889,39 @@ first pictured, and each sample after it (`samples`, each with the
 over it, only its box (`hovers`). A file that isn't one of these, or a
 sample that doesn't hold all that's measured, is said, exit 2.
 
-The tree never has what's typed in a field (an entry's, a text area's),
-but the pictures are screenshots, as `shoot`'s are, and show it: keep a
-saved run where you would a screenshot of the same window. A rich
+No JSON file but `fields.json` (below) has what's typed in a field (an
+entry's, a text area's), not even the tree. The pictures are
+screenshots, as `shoot`'s are, and show it: keep a saved run where you
+would a screenshot of the same window. A rich
 editor's text (a contenteditable's) is its nodes' names, as in any
 tree `a11y tree` reads, so it's in `tree.json` too.
 
 GTK 4 4.14 and later's text is found where it's drawn by drawing its
 name in its font ([below](#gtk-4s-positions)), which needs the
-program's fonts and GTK's layout, so from a file each node of a GTK 4
-window that would be measured, on any release, is a note: `PATH: text
-not measured from a file: GTK 4 is measured live only` (or `graphics`,
-or `edge`). What's behind
-a modal dialog is said as it was live.
+program's fonts and GTK's layout. So for a GTK 4 window DIR also holds
+what that search read of the tree and drew, as the live run asked for
+it, by each node's path: `gtk4.json` (each node's extents in its
+parent's, whether it has one child and no actions, as a stack's page,
+the node GTK finds at its middle, its font, where GTK lays out its
+text, its layer, what it draws, and when the time given to looking ran
+out, if it did) and
+`shapes.json` (each text drawn, as coverage, a byte a pixel). From them
+GTK 4 is measured as it was live, with no fonts or PyGObject, and with
+`SHOTBOX_TRUST_GTK4_BOUNDS` as the live run had it, whatever `--from`'s
+environment says.
+`fields.json` holds what's typed in a field, which the search reads to
+tell one text from another, and all that tells it: the field's font
+and the shapes its text is drawn as; it's left out where there's
+none. A line can say a field's text, live and from a file alike
+(`the entry "Name", whose text is "..."`). A run saved without
+`gtk4.json`, by shotbox before it kept them, gives each node of a GTK 4
+window that would be measured a note: `PATH: text not measured from a
+file: GTK 4 is measured live only` (or `graphics`, or `edge`); save it
+again. Measured again with the options it was saved with, it says what
+the live run did; with others, if it needs a read or a shape the live
+run didn't make, it says the saved run didn't read it, exit 2: save it
+again, with those options. What's behind a modal dialog is said as it
+was live.
 
 ### GTK 4's positions
 
