@@ -1315,11 +1315,6 @@ print([(n['role'], k, n[k]) for n in json.load(open(sys.argv[1])) for k in ('dra
       "$tmp/fields.json") && [ "$out" = "[('page tab', 'drawn', False)]" ] \
     && ok "a11y: tree --json, GTK 3: a tab not drawn says so, and nothing else is added" \
     || fail "a11y: tree --json, what lint reads: $out"
-  set +e
-  "$sb" run --a11y -- sh -c "'$app' & '$sb' a11y lint --window a11y-test --ignore 'image\[' --ignore 'panel with'" > "$tmp/lint"
-  st=$?; set -e
-  [ $st = 1 ] && [ "$(wc -l < "$tmp/lint")" = 1 ] && grep -q 'button with no name$' "$tmp/lint" \
-    && ok "a11y: lint --ignore leaves out what it's told to" || { fail "a11y: lint --ignore ($st)"; cat "$tmp/lint"; }
   "$sb" run --a11y -- sh -c "'$app' & '$sb' a11y click Announce --window a11y-test >/dev/null &&
     '$sb' wait announce 'notes\.md' --timeout 10" \
     && ok "a11y: click finds a button by its name, and clicks it" || fail "a11y: click"

@@ -71,6 +71,8 @@ for case, nodes, args, want in [
     ("ignored by its tree line", [W, node("frame/button[0]", "button")],
      ["--ignore", r'^button "": button'], (0, [])),
     ("ignored by where it is in the page", WEB + [ICON], ["--ignore", "button#icon"], (0, [])),
+    ("ignored by each of two", [W, node("frame/button[0]", "button"), node("frame/image[1]", "image")],
+     ["--ignore", r"^frame/button\[", "--ignore", r"^frame/image\["], (0, [])),
     ("from a tree saved without where it is in the page, not ignored by it",
      WEB + [{k: v for k, v in ICON.items() if k != "dom"}], ["--ignore", "button#icon"],
      (1, ["frame/document web[0]/button[0]: button with no name"])),
