@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """A libadwaita window to read the accessible tree of: test/a11y_app.py
 [fixed] [notes] [trap] [dialog] [lists] [one] [unfocusable] [untitled] [second] [faint]
-[thin] [long [down]] [keys] [form] [decoys] [lines] [letter] [carousel] [nested [recheck] [pale [both]]] [split] [twin [hidden] [under]] [over [hidden] [drawn | named]] [lone] [slow] [alert]
+[thin] [long [down]] [keys] [form] [decoys] [lines] [nested [recheck] [pale [both]]] [split] [twin [hidden] [under]] [over [hidden] [drawn | named]] [slow] [alert]
 [freeze] [ready [late]] [modal] [warned] [paged] [drawing] [fading]. Its icon-only button,
 its status icon and its drawing area have no accessible name unless
 `fixed`, nor has the window with `untitled`, and `second` opens an
@@ -19,10 +19,9 @@ named by a label with a mnemonic, `decoys` faint labels drawn otherwise
 than their font says (letter-spaced, upper case), each over an entry
 holding its text or showing it as a placeholder, or a drawing area
 drawing it (not all ASCII), `lines` a button labeled over two lines,
-`letter` a label of one letter, `carousel` a carousel at its second
-page, the first's label outside the window, `nested` "check" over
-"unchecked" (under "Recheck" with `recheck`; with `pale` "check" faint,
-and with `both` "unchecked" too), padded below as the decoys are, `split` a hidden
+`nested` "check" over "unchecked" (under "Recheck" with `recheck`; with
+`pale` "check" faint, and with `both` "unchecked" too), padded below as
+the decoys are, `split` a hidden
 "Open File" over "Open" and "File" side by side, padded so too;
 `twin` a faint "Twin" over an entry holding it, in a box padded below
 alone, with `under` under it, with `hidden` a hidden "Twin" over the
@@ -33,8 +32,7 @@ instead, and what's laid over its top draws "Twin": a label, a drawing
 area with `drawn`, or a label named "Brother" with `named`. With
 `hidden`, a hidden "Twin" is laid over the box's label too; without,
 the box's label is faint and an entry holding "Twin" is beside it all.
-`lone`
-an icon button and a faint letter-spaced label alone, `slow`
+`slow`
 moves the focus a second after Tab, and `alert` says an error
 and asks in an alert dialog as it starts, again once answered, then
 holds a button that makes a toast; `freeze`, a button that stops it
@@ -160,8 +158,6 @@ def activate(app):
             box.append(pair)
     if "lines" in sys.argv:
         box.append(Gtk.Button(label="Line one\nLine two"))
-    if "letter" in sys.argv:
-        box.append(Gtk.Label(label="x"))
     notes = Gtk.TextView()
     notes.get_buffer().set_text("notes")
     notes.get_buffer().connect("changed", lambda b: print(repr(b.props.text), flush=True))
@@ -257,11 +253,6 @@ def activate(app):
             pair.append(Gtk.Entry(text="Twin", valign=Gtk.Align.END, width_chars=4))
         pair.append(over)
         box.append(pair)
-    if "carousel" in sys.argv:
-        box = Adw.Carousel()
-        for text in ("Before", "Shown"):
-            box.append(Gtk.Label(label=text, hexpand=True, vexpand=True))
-        GLib.timeout_add(300, lambda: box.scroll_to(box.get_nth_page(1), False) and False)
     if "keys" in sys.argv:
         box = Gtk.Box()
         for label in ("1", "2", ".", "+", "(Draft)"):
@@ -274,10 +265,6 @@ def activate(app):
         view.append(Gtk.Button(label="Save"))
         if "unfocusable" in sys.argv:
             view.append(Gtk.Button(label="Play", focusable=False))
-    if "lone" in sys.argv:
-        view = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        view.append(Gtk.Button(icon_name="edit-delete-symbolic", tooltip_text="Delete"))
-        view.append(Gtk.Label(label="Spaced out", css_classes=["faint", "spaced"]))
     if "freeze" in sys.argv:
         view = Gtk.Button(label="Freeze")
         view.connect("clicked", lambda b: GLib.timeout_add(100, lambda: time.sleep(30)))

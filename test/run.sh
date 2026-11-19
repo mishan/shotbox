@@ -841,11 +841,16 @@ cat "$tmp/flickerf.log"
 fails=$((fails + $(grep -c '^FAIL' "$tmp/flickerf.log" || true)))
 [ $st = 0 ] || grep -q "^FAIL" "$tmp/flickerf.log" || fail "flicker_test.py: status $st"
 
-# a11y contrast --from, on trees and pictures made by hand: no display or bus.
+# a11y contrast --from, on trees and pictures made by hand: no display or bus;
+# GTK 4's windows, as its search reads and draws them.
 set +e; python3 "$here/contrast_test.py" "$sb" > "$tmp/contrastf.log" 2>&1; st=$?; set -e
 cat "$tmp/contrastf.log"
 fails=$((fails + $(grep -c '^FAIL' "$tmp/contrastf.log" || true)))
 [ $st = 0 ] || grep -q "^FAIL" "$tmp/contrastf.log" || fail "contrast_test.py: status $st"
+set +e; python3 "$here/contrast_gtk4_test.py" "$sb" > "$tmp/contrast4f.log" 2>&1; st=$?; set -e
+cat "$tmp/contrast4f.log"
+fails=$((fails + $(grep -c '^FAIL' "$tmp/contrast4f.log" || true)))
+[ $st = 0 ] || grep -q "^FAIL" "$tmp/contrast4f.log" || fail "contrast_gtk4_test.py: status $st"
 
 # shotbox mutate's targets and verdicts.
 set +e; python3 "$here/mutate_test.py" > "$tmp/mutate.log" 2>&1; st=$?; set -e
@@ -1480,8 +1485,6 @@ EOF
   # up to 4.14.5, which has each in its own box), or
   # isn't text, is said not to be, and why. --passes says what passes too,
   # and --json keeps what isn't measured apart from what fails.
-  # Told to trust it (a GTK whose bounds are right), it finds faint text
-  # and its colors, but not a disabled button's label.
   unfound="not found, but nothing where it can be has the contrast it needs: the best anything there reaches is 2\.5[0-9]:1"
   set +e
   "$sb" run --a11y -- sh -c "'$app' faint lines decoys &
@@ -1520,14 +1523,6 @@ assert j['passes'] and all(p['contrast'].startswith(('text passes at ', 'graphic
     && grep -q '/label\[[0-9]*\]: text 2\.5[01]:1, #a0a0a0 on #fafaf[ab] (at least 4\.5); found -\?[0-9]*,-\?[0-9]* px from \(where GTK 4\.[0-9.]* says its text is\|the corner of the box GTK 4\.[0-9.]* says\)$' "$tmp/contrast" \
     && ok "a11y: contrast finds GTK 4's text in a theme's font, over a grid, in a big window" \
     || { fail "a11y: contrast, GTK 4 themed ($st)"; cat "$tmp/contrast"; }
-  set +e
-  "$sb" run --a11y --env SHOTBOX_TRUST_GTK4_BOUNDS=1 -- sh -c "'$app' faint &
-    '$sb' a11y contrast --window a11y-test" > "$tmp/contrast"
-  st=$?; set -e
-  [ $st = 1 ] && [ "$(wc -l < "$tmp/contrast")" = 1 ] \
-    && grep -q '/label\[[0-9]*\]: text 2\.5[01]:1, #a0a0a0 on #fafaf[ab] (at least 4\.5)$' "$tmp/contrast" \
-    && ok "a11y: contrast finds faint text, and its colors, but not a disabled button's" \
-    || { fail "a11y: contrast, faint ($st)"; cat "$tmp/contrast"; }
   # Behind a modal dialog, libadwaita's in its window or a modal window,
   # the faint text is said apart, and doesn't fail, even with --strict;
   # not beside an error label on a view stack's second page (GTK lists
@@ -1738,8 +1733,7 @@ EOF
   fi
   # From 4.14, text that isn't looked for says why: rows scrolled out of
   # view, which GTK calls showing, above the list but in the window, and
-  # below the window; and from 4.22.3 a single letter, which GTK gives no
-  # width.
+  # below the window.
   micro=$(python3 -c "import ctypes; print(ctypes.CDLL('libgtk-4.so.1').gtk_get_micro_version())")
   while IFS='|' read -r least args lines want; do
     [ $((minor * 100 + micro)) -ge "$least" ] || continue
@@ -1750,7 +1744,6 @@ EOF
       || { fail "a11y: contrast, GTK 4, why not: $args"; cat "$tmp/contrast"; }
   done <<'CASES'
 1400|long down|2|/label\[\(2\|199\)\]: text not measured: not shown (scrolled out of view, or hidden)$
-2203|letter|1|: text not measured: GTK 4 reports its position wrong (a single letter: GTK gives it no width)$
 CASES
   # From 4.14, faint text over a theme's grid (a seeded gtk.css), whose
   # lines vary as much as the text does: found, and failing. Spaced, not
@@ -1783,11 +1776,6 @@ color: #3a3446; letter-spacing: 3px;||1|not found, but nothing where it can be h
 color: #ebe6f0; letter-spacing: 3px;||0|not measured: GTK 4 reports its position wrong (SPACED)$
 color: #ebe6f0; letter-spacing: 3px;|--strict|1|not measured: GTK 4 reports its position wrong (SPACED)$
 CASES
-    # Nor does a carousel's page not shown, its label outside the window.
-    "$sb" run --a11y -- sh -c "'$app' carousel & '$sb' wait window a11y-test >/dev/null &&
-      sleep 1 && '$sb' a11y contrast --window a11y-test" < /dev/null > "$tmp/contrast" 2>/dev/null \
-      && ok "a11y: contrast, GTK 4: a carousel's page not shown doesn't fail" \
-      || { fail "a11y: contrast, GTK 4, carousel"; cat "$tmp/contrast"; }
     # From 4.14.6, where "check" can be takes in "unchecked" under it:
     # "unchecked" is found, "check" inside it being no match for all of
     # it, and "check", matching in both, is taken at its own, the other
@@ -1878,15 +1866,6 @@ CASES
         && ok "a11y: contrast, GTK 4: an entry row's title not drawn is said so, its twin measured" \
         || { fail "a11y: contrast, GTK 4, entry row titles"; cat "$tmp/contrast"; }
     fi
-    # --strict: a window where nothing's measured but what fails, exit 1
-    # with the failure, not 2, "nothing measured".
-    set +e
-    "$sb" run --a11y -- sh -c "'$app' lone & '$sb' a11y contrast --strict --window a11y-test" \
-      < /dev/null > "$tmp/contrast" 2>/dev/null
-    st=$?; set -e
-    [ $st = 1 ] && grep -q ': text not found, but nothing where it can be' "$tmp/contrast" \
-      && ok "a11y: contrast --strict fails what fails, where nothing else is measured" \
-      || { fail "a11y: contrast --strict, lone ($st)"; cat "$tmp/contrast"; }
     # --strict fails what isn't measured (GTK 4's edges), but rows
     # scrolled out of view stay notes, as GTK 3 and browsers say nothing
     # of theirs.
