@@ -351,6 +351,14 @@ for case, files, said in [
                                               ("shapes.json", SHAPES)], "isn't what contrast --save writes"),
     ("shapes.json, not an object", [("gtk4.json", gtk4()), ("shapes.json", [1])],
      "isn't what contrast --save writes"),
+    ("an empty group of shapes", [("gtk4.json", gtk4()), ("shapes.json", {"version": 1, "shapes": [
+        {"text": "Hi", "attrs": ATTRS, "dy": 0, "kinds": [[]]}]})], "isn't what contrast --save writes"),
+    ("no shapes at all, but not null", [("gtk4.json", gtk4()), ("shapes.json", {"version": 1, "shapes": [
+        {"text": "Hi", "attrs": ATTRS, "dy": 0, "kinds": []}]})], "isn't what contrast --save writes"),
+    ("gtk4.json with no gone", [("gtk4.json", {k: v for k, v in gtk4().items() if k != "gone"}),
+                                ("shapes.json", SHAPES)], "isn't what contrast --save writes"),
+    ("gtk4.json with no cannot", [("gtk4.json", {k: v for k, v in gtk4().items() if k != "cannot"}),
+                                  ("shapes.json", SHAPES)], "isn't what contrast --save writes"),
     ("a shape with no kinds", [("gtk4.json", gtk4()), ("shapes.json", {"version": 1, "shapes": [
         {"text": "Hi", "attrs": ATTRS, "dy": 0}]})], "isn't what contrast --save writes"),
     ("fields.json with no shapes", [("gtk4.json", gtk4()), ("shapes.json", SHAPES),
@@ -419,6 +427,10 @@ for case, kw, said in [
     st, out, err = contrast([W, label()], FAINT, **kw)
     check(st == 2 and not out and said in err and "Traceback" not in err,
           f"contrast --from: {case}, said ({st}, {err!r})")
+
+r = subprocess.run([sb, "a11y", "contrast", "--help"], capture_output=True, text=True)
+check("GTK 4's isn't measured" not in r.stdout and "gtk4.json" in r.stdout,
+      f"contrast --help: --from measures GTK 4 from what was saved with it ({r.stdout[-400:]!r})")
 
 (tmp / "full").mkdir()
 (tmp / "full" / "tree.json").write_text("[]")

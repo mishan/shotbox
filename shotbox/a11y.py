@@ -4036,7 +4036,7 @@ def saved_gtk4(d, paths):
             "texts": lambda v: isinstance(v, list) and all(isinstance(t, str) for t in v)}
 
     def kind(k):
-        return isinstance(k, list) and all(
+        return isinstance(k, list) and k and all(
             isinstance(s, list) and len(s) == 3 and type(s[0]) is int and type(s[1]) is int
             and s[0] > 0 and s[1] > 0 and isinstance(s[2], str) for s in k)
 
@@ -4044,7 +4044,8 @@ def saved_gtk4(d, paths):
         """A shape as save_contrast() writes it, decoded, or None."""
         if not (isinstance(s, dict) and isinstance(s.get("text"), str) and strs(s.get("attrs"))
                 and type(s.get("dy")) in (int, float) and "kinds" in s
-                and (s["kinds"] is None or isinstance(s["kinds"], list) and all(map(kind, s["kinds"])))):
+                and (s["kinds"] is None or isinstance(s["kinds"], list) and s["kinds"]
+                     and all(map(kind, s["kinds"])))):
             return None
         try:
             kinds = s["kinds"] and [[(w, h, base64.b64decode(c, validate=True)) for w, h, c in k]
@@ -4072,7 +4073,8 @@ def saved_gtk4(d, paths):
     g = load("gtk4.json", False)
     if g is None:
         return None
-    read("gtk4.json", g, lambda g: type(g.get("trusted")) is bool and type(g.get("raised")) is bool
+    read("gtk4.json", g, lambda g: {"trusted", "raised", "cannot", "gone"} <= set(g)
+         and type(g["trusted"]) is bool and type(g["raised"]) is bool
          and (g.get("cannot") is None or isinstance(g["cannot"], str))
          and (g.get("gone") is None or type(g["gone"]) is int and g["gone"] > 0), shapes=False)
     drawings = dict(read("shapes.json", load("shapes.json"), lambda s: True, reads=False))
@@ -4560,7 +4562,8 @@ def read(argv):
                     help="also what passes, with its ratio, after what fails")
     ct.add_argument("--from", dest="saved", metavar="DIR",
                     help="what contrast --save wrote to DIR, not the live screen: needs no "
-                         "session, but GTK 4's isn't measured")
+                         "session; GTK 4's is measured from what its search read and drew, "
+                         "as saved (gtk4.json), not in a run saved without it")
     ct.add_argument("--save", metavar="DIR",
                     help="also write to DIR the tree and pictures it measured, for "
                          "contrast --from DIR (the pictures can show what's typed in a field)")
