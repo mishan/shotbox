@@ -46,7 +46,9 @@ def coverage(cols, dy):
     a row more where it's split."""
     def at(col, y):
         return 0 <= y < TALL and col >> y & 1
-    rows, lower = range(TALL + bool(dy)), dy - (dy < 0)
+    # Raised, it's drawn as if lowered the rest of a pixel, from a row
+    # higher: the row more is above.
+    rows, lower = range(TALL + bool(dy)), dy + (dy < 0)
     return [[(1 - lower % 1) * at(col, int(y - lower // 1)) + lower % 1 * at(col, int(y - lower // 1) - 1)
              for col in cols] for y in rows]
 
@@ -161,6 +163,11 @@ def label(win, i, name, says, drawn, color=FAINT, up="frame/panel[0]", **more):
 def boxed(release):
     """A window with a panel GTK says is at 10,10, 280 by 60."""
     return Gtk4Window(release).add("frame/panel[0]", "panel", says=[10, 10, 280, 60])
+
+
+def loose(line):
+    """`line` as a pattern, any score for 0.NN, anything for "..."."""
+    return re.compile(re.escape(line).replace(r"0\.NN", r"0\.\d\d").replace(r"\.\.\.", ".*"))
 
 
 def run(case, got, want):
@@ -319,20 +326,25 @@ for faint, st in [((), 0), (("check",), 1)]:
 # over one that passes, bounded by what's there, changing: up to 16.57:1,
 # the most anything where it can be reaches, not its own 16.29:1.
 TWICE = 'not measured: GTK 4 reports its position wrong (it matches elsewhere too, in "Reecheck")'
+L2 = "frame/panel[0]/label[2]: text "
+OVER = loose(L0 + NOTED + " (it matches elsewhere too, 0.NN: the same text twice, or like it)")
+UNDER = L2 + NOTED + ' (another node\'s text matches there too: "Recheck")'
+NONE = "not found, but nothing where it can be has the contrast it needs: the best anything there reaches is "
+CHANGING = "changing: 1.01:1 to 16.57:1 (at least 4.5)"
 for case, faint, blink, want in [
-        ("matching in two places, faint, where the other passes, a note", ["check"], False, TWICE),
+        ("matching in two places, faint, where the other passes, a note", ["check"], False,
+         (2, [OVER, L1 + TWICE, UNDER])),
         ("matching in two places, faint in both, failing at the better", ["check", "Reecheck"], False,
-         "2.61:1 at best, #a0a0a0 on #ffffff (at least 4.5); it matches in two places and fails in both"
-         + FOUND48),
-        ("matching in two places, passing, a note", [], False, TWICE),
+         (1, [L1 + "2.61:1 at best, #a0a0a0 on #ffffff (at least 4.5); it matches in two places and fails in "
+              "both" + FOUND48, L2 + NONE + "2.66:1 (at least 4.5)", OVER])),
+        ("matching in two places, passing, a note", [], False, (2, [OVER, L1 + TWICE, UNDER])),
         ("blinking, matching in two places, where the other passes, changing", ["check"], True,
-         "changing: 1.01:1 to 16.57:1 (at least 4.5)"),
+         (1, [L2 + NONE + "1.01:1 (at least 4.5)", L0 + CHANGING, L1 + CHANGING])),
         ("blinking, matching in two places, faint in both, failing at its colors",
          ["check", "Reecheck"], True,
-         "2.61:1 at best, changing from 1.01:1, #a0a0a0 on #ffffff (at least 4.5)")]:
-    _, out, _ = stacked(["Recheck", "check", "Reecheck"], faint, blink).contrast("--passes")
-    got = [line for line in out if line.startswith(L1)]
-    check(got == [L1 + want], f"contrast --from, GTK 4: {case}" + ("" if got == [L1 + want] else f": {out}"))
+         (1, [L1 + "2.61:1 at best, changing from 1.01:1, #a0a0a0 on #ffffff (at least 4.5)",
+              L2 + "2.66:1 at best, changing from 1.01:1 (at least 4.5)", L0 + CHANGING]))]:
+    run(case, stacked(["Recheck", "check", "Reecheck"], faint, blink).contrast("--passes"), want)
 
 # A hidden "Open File" isn't taken for "Open" and "File" drawn side by
 # side under it, where it would draw them: "Open" is drawn only there.
@@ -464,14 +476,17 @@ for case, win, want in [
               f"{P}/panel[0]/label[1]: text " + AGAIN + '"Twin")',
               f"{P}/panel[0]/label[2]: text " + OTHER + '"Twin")']))]:
     run(case, win.contrast("--passes"), want)
-for case, win in [("a drawing area drawing it, and a hidden one", over(True, True)),
-                  ("a drawing area drawing it", over(drawn=True)),
-                  ("a label named otherwise", over(named=True))]:
-    st, out, _ = win.contrast("--passes")
-    noted = st == 2 and out and all(": text not measured: GTK 4 reports its position wrong (" in line
-                                    for line in out)
-    check(noted, "contrast --from, GTK 4: a twin where GTK says a label is, with "
-          f"{case} on top, not measured" + ("" if noted else f": {st}, {out}"))
+TIED = NOTED + " (it matches elsewhere too, ...)"
+for case, win, want in [
+        ("a drawing area drawing it, and a hidden one", over(True, True),
+         [f"{P}/panel[0]/panel[0]/label[0]: text " + TIED,
+          f"{P}/panel[0]/label[2]: text " + OTHER + '"Twin")']),
+        ("a drawing area drawing it", over(drawn=True), [f"{P}/panel[1]/panel[0]/label[0]: text " + TIED]),
+        ("a label named otherwise", over(named=True),
+         [f"{P}/panel[1]/panel[0]/label[0]: text " + TIED,
+          f"{P}/panel[1]/label[1]: text " + NOTED + " (no match good enough: 0.NN at best)"])]:
+    run(f"a twin where GTK says a label is, with {case} on top, not measured", win.contrast("--passes"),
+        (2, [loose(line) for line in want]))
 
 # An entry row's two title labels at one place, the small one drawn, the
 # large one not: that one said so, not failed for what's there, nor
@@ -495,14 +510,16 @@ def titled(color):
     return label(win, 3, "Ghost", [5, 165, 40, 17], None, up="frame")
 
 
-for color, said in [(FAINT, FAILING), (DARK, PASSING)]:
-    _, out, _ = titled(color).contrast("--passes")
-    twins = [line for line in out if "drawn where it is instead" in line]
-    ok = (ROW + "/label[1]: text " + said + "; found 8,2 px from where GTK 4.14.6 says its text is" in out
-          and twins == [ROW + "/label[0]: text not measured: GTK 4 reports its position wrong (another node "
-                              "with its text is drawn where it is instead)"])
-    check(ok, "contrast --from, GTK 4: an entry row's title not drawn said so, its twin measured "
-          f"({said[:6]})" + ("" if ok else f": {out}"))
+FOUND82 = "; found 8,2 px from where GTK 4.14.6 says its text is"
+DRAWN = [f"frame/panel[1]/label[0]: text {PASSING}; found 0,0 px from where GTK 4.14.6 says its text is",
+         f"frame/label[2]: text {PASSING}; found 0,0 px from where GTK 4.14.6 says its text is",
+         ROW + "/label[0]: text " + NOTED + " (another node with its text is drawn where it is instead)",
+         loose("frame/panel[1]/label[1]: text " + NOTED + " (no match good enough: 0.NN at best)")]
+GONE = "frame/label[3]: text " + NONE + "1.01:1 (at least 4.5)"
+for look, color, want in [("faint", FAINT, [ROW + "/label[1]: text " + FAILING + FOUND82, GONE]),
+                          ("dark", DARK, [GONE, ROW + "/label[1]: text " + PASSING + FOUND82])]:
+    run(f"an entry row's title not drawn said so, its twin measured ({look})",
+        titled(color).contrast("--passes"), (1, want + DRAWN))
 
 # Rows of a list scrolled out of view, which GTK calls showing: above the
 # list but in the window, and below the window, said not shown, as with

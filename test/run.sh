@@ -1747,8 +1747,9 @@ EOF
     fi
     # GTK's scrolled list: rows scrolled out of view, which GTK calls
     # showing, above the list but in the window, and below the window,
-    # said not shown.
-    "$sb" run --a11y -- sh -c "'$app' long down & '$sb' a11y contrast --window a11y-test" \
+    # said not shown, once it's scrolled.
+    "$sb" run --a11y -- sh -c "'$app' long down & '$sb' wait window a11y-test >/dev/null &&
+      sleep 1 && '$sb' a11y contrast --window a11y-test" \
       < /dev/null > "$tmp/contrast" 2>&1 || true
     [ "$(grep -c '/label\[\(2\|199\)\]: text not measured: not shown (scrolled out of view, or hidden)$' "$tmp/contrast")" = 2 ] \
       && ok "a11y: contrast, GTK 4: rows scrolled out of view are said not shown" \
