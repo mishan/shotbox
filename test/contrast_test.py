@@ -212,6 +212,69 @@ check((st, sorted(out)) == (0, ["frame/button[1]: edge not measured: outside the
       f"contrast --from: past the screen's edge, not measured ({st}, {out})")
 
 
+# Behind a modal dialog, each case a shape the rule names, in a GTK 4 tree,
+# where with --strict all that isn't behind one fails, being a note.
+FULL = [0, 0, 200, 100]
+
+
+def behind(*more, toolkit="GTK 4.16.3"):
+    """What's said behind a modal dialog, and what fails, in a window of
+    `toolkit` whose content holds a page with a faint label, then `more`."""
+    _, out, _ = contrast([window(toolkit=toolkit), node("frame/panel[0]", "panel", bounds=FULL),
+                          node("frame/panel[0]/panel[0]", "panel", bounds=FULL),
+                          node("frame/panel[0]/panel[0]/label[0]", "label", "Faint words", bounds=BOX),
+                          *more], FAINT, "--strict", "--json")
+    j = json.loads(out[0]) if out else {}
+    return (sorted((n["name"], n["behind"]) for n in j.get("behind", [])),
+            sorted(n["name"] for n in j.get("problems", [])))
+
+
+for case, more, kw, want in [
+    ("libadwaita 1.10's dialog, laid over the content", [node("frame/panel[0]/dialog[1]", "dialog", "Reply", bounds=FULL)],
+     {}, ([("Faint words", 'text behind a modal dialog "Reply"')], [])),
+    ("only what's drawn under it", [node("frame/panel[0]/dialog[1]", "dialog", "Reply", bounds=FULL),
+                                   node("frame/panel[0]/label[2]", "label", "After", bounds=BOX)],
+     {}, ([("Faint words", 'text behind a modal dialog "Reply"')], ["After"])),
+    ("libadwaita 1.5's sheet, three down from a layer, named by the first name in it",
+     [node("frame/panel[0]/panel[1]", "panel", bounds=FULL),
+      node("frame/panel[0]/panel[1]/panel[0]", "panel", bounds=FULL),
+      node("frame/panel[0]/panel[1]/panel[0]/panel[0]", "panel", bounds=FULL),
+      node("frame/panel[0]/panel[1]/panel[0]/panel[0]/dialog[1]", "dialog", bounds=BOX),
+      node("frame/panel[0]/panel[1]/panel[0]/panel[0]/dialog[1]/label[0]", "label", "Notes", bounds=BOX)],
+     {}, ([("Faint words", 'text behind a modal dialog "Notes"')], ["Notes"])),
+    ("libadwaita 1.5's alert dialog, laid over the content",
+     [node("frame/panel[0]/alert[1]", "alert", "Discard?", bounds=FULL)],
+     {}, ([("Faint words", 'text behind a modal dialog "Discard?"')], [])),
+    ("an error label", [node("frame/panel[0]/panel[0]/alert[1]", "alert", "Wrong password", bounds=BOX)],
+     {}, ([], ["Faint words"])),
+    ("a box or popover given a dialog's role, after the content",
+     [node("frame/panel[0]/dialog[1]", "dialog", "Find", bounds=BOX)], {}, ([], ["Faint words"])),
+    ("after a stack's page GTK lists twice, with no bounds",
+     [node("frame/panel[0]/panel[1]", "panel"), node("frame/panel[0]/alert[2]", "alert", "Offline", bounds=FULL)],
+     {}, ([], ["Faint words"])),
+    ("after a banner folded away, showing but no height",
+     [node("frame/panel[0]/grouping[1]", "grouping", "Offline", bounds=[0, 0, 200, 0]),
+      node("frame/panel[0]/alert[2]", "alert", "Offline", bounds=FULL)], {}, ([], ["Faint words"])),
+    ("after a page not showing", [node("frame/panel[0]/panel[1]", "panel", bounds=FULL, showing=False),
+                                  node("frame/panel[0]/alert[2]", "alert", "Offline", bounds=FULL)],
+     {}, ([], ["Faint words"])),
+    ("a dialog not showing", [node("frame/panel[0]/dialog[1]", "dialog", "Reply", bounds=FULL, showing=False)],
+     {}, ([], ["Faint words"])),
+    ("an alert in a box laid over the rest", [node("frame/panel[0]/panel[1]", "panel", bounds=FULL),
+                                              node("frame/panel[0]/panel[1]/alert[0]", "alert", "Lost connection",
+                                                   bounds=BOX)], {}, ([], ["Faint words"])),
+    ("dialogs over dialogs: the last in front",
+     [node("frame/panel[0]/dialog[1]", "dialog", "First", bounds=FULL),
+      node("frame/panel[0]/dialog[1]/label[0]", "label", "In first", bounds=BOX),
+      node("frame/panel[0]/dialog[2]", "dialog", "Second", bounds=FULL)],
+     {}, ([("Faint words", 'text behind a modal dialog "Second"'),
+           ("In first", 'text behind a modal dialog "Second"')], [])),
+    ("GTK 3's dialog, not modal", [node("frame/panel[0]/dialog[1]", "dialog", "Find", bounds=FULL)],
+     {"toolkit": "gtk 3.24.49"}, ([], ["Faint words"])),
+]:
+    got = behind(*more, **kw)
+    check(got == want, f"contrast --from: behind a modal dialog: {case}" + ("" if got == want else f": {got}"))
+
 # --json, as the live one has it: no depth, pid or what was read live.
 st, out, _ = contrast([W, label(large=True, color="#555555")], FAINT, "--json")
 j = json.loads(out[0]) if out else {}

@@ -1510,19 +1510,14 @@ assert j['passes'] and all(p['contrast'].startswith(('text passes at ', 'graphic
     || { fail "a11y: contrast, faint ($st)"; cat "$tmp/contrast"; }
   # Behind a modal dialog, libadwaita's in its window or a modal window,
   # the faint text is said apart, and doesn't fail, even with --strict;
-  # not beside an error label (an alert), a box with a dialog's role or a
-  # popover with one, under a GTK 3 modal popover, or over an alert
-  # (a status page under a toast, a label under an overlay), nor for an
-  # alert in a layer-like box: after a banner folded away, on a view
-  # stack's second page (GTK lists it twice), or laid over the rest.
-  # libadwaita 1.5 names its dialog nothing, and shows no title for this
-  # one, so it's said by the first name in it, its text view's.
+  # not beside an error label on a view stack's second page (GTK lists
+  # it twice), or under a GTK 3 modal popover. test/contrast_test.py has each shape the rule
+  # names; these are the trees GTK and libadwaita give them. libadwaita
+  # 1.5 names its dialog nothing, and shows no title for this one, so
+  # it's said by the first name in it, its text view's.
   for over in "$app faint dialog;a11y-test;dialog \"(Reply|Notes)\"" \
               "$app faint modal;a11y-test;dialog \"Over\"" \
-              "$app faint warned;a11y-test;" "$app faint inline;a11y-test;" \
-              "$app faint popped;a11y-test;" "$app toasted;a11y-test;" \
-              "$app overlaid;a11y-test;" "$app faint warned folded;a11y-test;" \
-              "$app faint warned paged;a11y-test;" "$app faint laid;a11y-test;" \
+              "$app faint warned paged;a11y-test;" \
               "$here/window.py popover popover;popover;"; do
     cmd=${over%%;*} win=${over#*;} want=${over##*;}
     "$sb" run --a11y -- sh -c "$cmd & '$sb' a11y contrast --strict --json --window ${win%%;*}" \
