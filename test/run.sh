@@ -1544,24 +1544,20 @@ assert (len(faint) == 1 and re.fullmatch('text behind a modal ' + want, faint[0]
   # GTK 3 calls a switch a toggle button; a frame draws a text view's
   # edge; light text, which can measure short of its color (by how much
   # depends on the font), is said to be that color; a large heading needs
-  # 3:1; a dot is too small to measure, which passes.
+  # 3:1; a dot is too small to measure. --save keeps what was read live of
+  # each node, and the pictures.
+  rm -rf "$tmp/saved"
   set +e
   "$sb" run --a11y -- sh -c "'$here/window.py' g3 contrast &
-    '$sb' a11y contrast --edges 3 --window g3" > "$tmp/contrast" 2> "$tmp/err"
+    '$sb' a11y contrast --edges 3 --window g3 --save '$tmp/saved'" > "$tmp/contrast2" 2> "$tmp/err"
   st=$?; set -e
-  [ $st = 1 ] && grep -q '/label\[1\]: text [0-9]' "$tmp/contrast" \
-    && ! grep -q 'toggle button\|/text\[0\]\|/label\[4\]' "$tmp/contrast" \
-    && ! grep -q 'GTK None' "$tmp/contrast" "$tmp/err" \
-    && grep -q '/label\[5\]: text too small to measure' "$tmp/contrast" \
-    && ! grep '/label\[0\]: ' "$tmp/contrast" | grep -qv 'drawn lighter than its color, #5f5670, which is 6\.5[0-9]:1' \
-    && "$sb" run --a11y -- sh -c "'$here/window.py' dot dot & '$sb' a11y contrast --window dot" \
-      2>/dev/null | grep -q '/label\[0\]: text too small to measure' \
-    && ok "a11y: contrast, GTK 3: not a switch, a framed text view, light text, large text, a dot, which passes alone" \
-    || { fail "a11y: contrast, GTK 3 ($st)"; cat "$tmp/contrast"; }
-  # --save keeps what was read live of each node, and the pictures.
-  rm -rf "$tmp/saved"
-  "$sb" run --a11y -- sh -c "'$here/window.py' g3 contrast &
-    '$sb' a11y contrast --edges 3 --window g3 --save '$tmp/saved'" > "$tmp/contrast2" 2>&1 || true
+  [ $st = 1 ] && grep -q '/label\[1\]: text [0-9]' "$tmp/contrast2" \
+    && ! grep -q 'toggle button\|/text\[0\]\|/label\[4\]' "$tmp/contrast2" \
+    && ! grep -q 'GTK None' "$tmp/contrast2" "$tmp/err" \
+    && grep -q '/label\[5\]: text too small to measure' "$tmp/contrast2" \
+    && ! grep '/label\[0\]: ' "$tmp/contrast2" | grep -qv 'drawn lighter than its color, #5f5670, which is 6\.5[0-9]:1' \
+    && ok "a11y: contrast, GTK 3: not a switch, a framed text view, light text, large text, a dot" \
+    || { fail "a11y: contrast, GTK 3 ($st)"; cat "$tmp/contrast2" "$tmp/err"; }
   python3 -c "import json, os, sys; d = sys.argv[1]
 t, p = json.load(open(d + '/tree.json')), json.load(open(d + '/pictures.json'))
 by = {n['path'].split('/', 1)[-1]: n for n in t}

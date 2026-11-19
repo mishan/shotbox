@@ -58,8 +58,8 @@ def node(path, role, name="", states=(), bounds=None, **more):
 
 
 def window(toolkit="gtk 3.24.49", **more):
-    return node("frame", "frame", "w", bounds=[0, 0, 200, 100], pid=7, toolkit=toolkit,
-                window=[0, 0, 200, 100], **more)
+    return node("frame", "frame", "w", pid=7, toolkit=toolkit,
+                **{"bounds": [0, 0, 200, 100], "window": [0, 0, 200, 100], **more})
 
 
 def contrast(nodes, screen, *args, samples=(), hovers=(), pictures=None, tree=None):
@@ -190,6 +190,27 @@ st, out, _ = contrast([W, node("frame/button[0]", "button", "Save", bounds=BOX)]
                       "--edges", "3")
 check(st == 1 and any(line.startswith("frame/button[0]: edge 1.1") for line in out),
       f"contrast --from --edges: a button with no edge to speak of ({st}, {out})")
+
+# A field with no edge of its own, in a box that draws one round it.
+FRAMED = Pic().fill(20, 20, 100, 1, BLACK).fill(20, 59, 100, 1, BLACK) \
+    .fill(20, 20, 1, 40, BLACK).fill(119, 20, 1, 40, BLACK)
+st, out, _ = contrast([W, node("frame/panel[0]", "panel", bounds=[20, 20, 100, 40]),
+                       node("frame/panel[0]/text[0]", "text", "Notes", ["editable"],
+                            bounds=[24, 24, 92, 32])], FRAMED, "--edges", "3", "--passes")
+check((st, [line[:63] for line in out]) == (
+    0, ["frame/panel[0]/text[0]: edge passes, drawn by what it's in; its"]),
+      f"contrast --from --edges: a field's edge drawn by what it's in ({st}, {out})")
+
+# A window wider than the screen: what's past its edge isn't measured.
+st, out, _ = contrast([window(window=[0, 0, 300, 100], bounds=[0, 0, 300, 100]),
+                       label(bounds=[150, 10, 100, 20]),
+                       node("frame/button[1]", "button", "There", bounds=[220, 10, 60, 20])],
+                      Pic(), "--edges", "3")
+check((st, sorted(out)) == (0, ["frame/button[1]: edge not measured: outside the screen",
+                                "frame/button[1]: text not measured: outside the screen",
+                                "frame/label[0]: text not measured: partly outside the screen"]),
+      f"contrast --from: past the screen's edge, not measured ({st}, {out})")
+
 
 # --json, as the live one has it: no depth, pid or what was read live.
 st, out, _ = contrast([W, label(large=True, color="#555555")], FAINT, "--json")

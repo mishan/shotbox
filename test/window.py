@@ -22,8 +22,7 @@ entry named by its mnemonic label, and a search bar not revealed, in a
 notebook with its tabs hidden. With alert, a Check button that shows an
 error in an info bar and is renamed Checked, a Resend button that counts
 down to 1s, and a Delete button that asks in a message dialog, its window
-titled Delete. With dot,
-a "." and nothing else. With secret, a label Plain and below it one,
+titled Delete. With secret, a label Plain and below it one,
 Secret, drawn all magenta, its text and background. With popover, a faint label and a modal popover
 open below it. With wide, a window 1000 pixels wide, a label
 as wide, its text at the right, and below it a button at each end. With
@@ -96,8 +95,6 @@ elif sys.argv[2:] == ["popover"]:
     pop.add(Gtk.Button(label="Inside", visible=True))
     GLib.timeout_add(300, lambda: pop.popup() and False)
     w.add(faint)
-elif sys.argv[2:] == ["dot"]:
-    w.add(Gtk.Label(label="."))
 elif sys.argv[2:] == ["secret"]:
     css = Gtk.CssProvider()
     css.load_from_data(b"#secret { background: #ff00ff; color: #ff00ff; }")
