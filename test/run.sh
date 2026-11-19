@@ -841,11 +841,16 @@ cat "$tmp/flickerf.log"
 fails=$((fails + $(grep -c '^FAIL' "$tmp/flickerf.log" || true)))
 [ $st = 0 ] || grep -q "^FAIL" "$tmp/flickerf.log" || fail "flicker_test.py: status $st"
 
-# a11y contrast --from, on trees and pictures made by hand: no display or bus.
+# a11y contrast --from, on trees and pictures made by hand: no display or bus;
+# GTK 4's windows, as its search reads and draws them.
 set +e; python3 "$here/contrast_test.py" "$sb" > "$tmp/contrastf.log" 2>&1; st=$?; set -e
 cat "$tmp/contrastf.log"
 fails=$((fails + $(grep -c '^FAIL' "$tmp/contrastf.log" || true)))
 [ $st = 0 ] || grep -q "^FAIL" "$tmp/contrastf.log" || fail "contrast_test.py: status $st"
+set +e; python3 "$here/contrast_gtk4_test.py" "$sb" > "$tmp/contrast4f.log" 2>&1; st=$?; set -e
+cat "$tmp/contrast4f.log"
+fails=$((fails + $(grep -c '^FAIL' "$tmp/contrast4f.log" || true)))
+[ $st = 0 ] || grep -q "^FAIL" "$tmp/contrast4f.log" || fail "contrast_gtk4_test.py: status $st"
 
 # shotbox mutate's targets and verdicts.
 set +e; python3 "$here/mutate_test.py" > "$tmp/mutate.log" 2>&1; st=$?; set -e
@@ -1480,8 +1485,6 @@ EOF
   # up to 4.14.5, which has each in its own box), or
   # isn't text, is said not to be, and why. --passes says what passes too,
   # and --json keeps what isn't measured apart from what fails.
-  # Told to trust it (a GTK whose bounds are right), it finds faint text
-  # and its colors, but not a disabled button's label.
   unfound="not found, but nothing where it can be has the contrast it needs: the best anything there reaches is 2\.5[0-9]:1"
   set +e
   "$sb" run --a11y -- sh -c "'$app' faint lines decoys &
@@ -1520,14 +1523,6 @@ assert j['passes'] and all(p['contrast'].startswith(('text passes at ', 'graphic
     && grep -q '/label\[[0-9]*\]: text 2\.5[01]:1, #a0a0a0 on #fafaf[ab] (at least 4\.5); found -\?[0-9]*,-\?[0-9]* px from \(where GTK 4\.[0-9.]* says its text is\|the corner of the box GTK 4\.[0-9.]* says\)$' "$tmp/contrast" \
     && ok "a11y: contrast finds GTK 4's text in a theme's font, over a grid, in a big window" \
     || { fail "a11y: contrast, GTK 4 themed ($st)"; cat "$tmp/contrast"; }
-  set +e
-  "$sb" run --a11y --env SHOTBOX_TRUST_GTK4_BOUNDS=1 -- sh -c "'$app' faint &
-    '$sb' a11y contrast --window a11y-test" > "$tmp/contrast"
-  st=$?; set -e
-  [ $st = 1 ] && [ "$(wc -l < "$tmp/contrast")" = 1 ] \
-    && grep -q '/label\[[0-9]*\]: text 2\.5[01]:1, #a0a0a0 on #fafaf[ab] (at least 4\.5)$' "$tmp/contrast" \
-    && ok "a11y: contrast finds faint text, and its colors, but not a disabled button's" \
-    || { fail "a11y: contrast, faint ($st)"; cat "$tmp/contrast"; }
   # Behind a modal dialog, libadwaita's in its window or a modal window,
   # the faint text is said apart, and doesn't fail, even with --strict;
   # not beside an error label on a view stack's second page (GTK lists
@@ -1736,167 +1731,29 @@ EOF
     [ -z "$wrong" ] && ok "a11y: contrast, GTK 4: thin stems at their color, but not past what the shape accounts for; bold text as before" \
       || { fail "a11y: contrast, GTK 4 thin and bold text:$wrong"; cat "$tmp/contrast"; }
   fi
-  # From 4.14, text that isn't looked for says why: rows scrolled out of
-  # view, which GTK calls showing, above the list but in the window, and
-  # below the window; and from 4.22.3 a single letter, which GTK gives no
-  # width.
   micro=$(python3 -c "import ctypes; print(ctypes.CDLL('libgtk-4.so.1').gtk_get_micro_version())")
-  while IFS='|' read -r least args lines want; do
-    [ $((minor * 100 + micro)) -ge "$least" ] || continue
-    "$sb" run --a11y -- sh -c "'$app' $args & '$sb' a11y contrast --window a11y-test" \
-      < /dev/null > "$tmp/contrast" 2>&1 || true
-    [ "$(grep -c "$want" "$tmp/contrast")" = "$lines" ] \
-      && ok "a11y: contrast, GTK 4: says why it didn't look for text: $args" \
-      || { fail "a11y: contrast, GTK 4, why not: $args"; cat "$tmp/contrast"; }
-  done <<'CASES'
-1400|long down|2|/label\[\(2\|199\)\]: text not measured: not shown (scrolled out of view, or hidden)$
-2203|letter|1|: text not measured: GTK 4 reports its position wrong (a single letter: GTK gives it no width)$
-CASES
-  # From 4.14, faint text over a theme's grid (a seeded gtk.css), whose
-  # lines vary as much as the text does: found, and failing. Spaced, not
-  # found, but nothing where it can be has the contrast text needs, which
-  # fails too; readable and spaced, not found, which doesn't, but for
-  # --strict. A case a line: its color, the options, the exit status,
-  # what's said.
   if [ "$minor" -ge 14 ]; then
-    # From 4.14.6, GTK says how wide it lays text out: wider, it's said.
-    spaced='no match good enough: 0\.[0-9]* at best'
-    [ $((minor * 100 + micro)) -lt 1406 ] \
-      || spaced='GTK lays it out [0-9][0-9]* px wider than its font draws it: letter-spaced, larger or upper case'
-    while IFS='|' read -r look args status want; do
-      want=$(printf '%s' "$want" | sed "s/SPACED/$spaced/")
-      mkdir -p "$tmp/dim/.config/gtk-4.0"
-      printf '%s\n' 'window { background-color: #0f0d14; background-image:' \
-        '  repeating-linear-gradient(90deg, #1e1929, #1e1929 1px, transparent 1px, transparent 24px),' \
-        '  repeating-linear-gradient(0deg, #1e1929, #1e1929 1px, transparent 1px, transparent 24px); }' \
-        "label.faint { $look }" > "$tmp/dim/.config/gtk-4.0/gtk.css"
-      set +e
-      "$sb" run --a11y --dark --seed "$tmp/dim" -- sh -c "'$app' faint &
-        '$sb' a11y contrast $args --window a11y-test" < /dev/null > "$tmp/contrast" 2>/dev/null
-      st=$?; set -e
-      [ $st = "$status" ] && grep -q "/label\[7\]: text $want" "$tmp/contrast" \
-        && ok "a11y: contrast, GTK 4, faint over a grid: $look $args" \
-        || { fail "a11y: contrast, GTK 4, faint over a grid: $look $args ($st)"; cat "$tmp/contrast"; }
-    done <<'CASES'
-color: #3a3446;||1|1\.6[01]:1, #3a3446 on #0f0d14 (at least 4\.5); found -\?[0-9]*,
-color: #3a3446; letter-spacing: 3px;||1|not found, but nothing where it can be has the contrast it needs: the best anything there reaches is 1\.[0-9]*:1 (at least 4\.5)$
-color: #ebe6f0; letter-spacing: 3px;||0|not measured: GTK 4 reports its position wrong (SPACED)$
-color: #ebe6f0; letter-spacing: 3px;|--strict|1|not measured: GTK 4 reports its position wrong (SPACED)$
-CASES
-    # Nor does a carousel's page not shown, its label outside the window.
-    "$sb" run --a11y -- sh -c "'$app' carousel & '$sb' wait window a11y-test >/dev/null &&
-      sleep 1 && '$sb' a11y contrast --window a11y-test" < /dev/null > "$tmp/contrast" 2>/dev/null \
-      && ok "a11y: contrast, GTK 4: a carousel's page not shown doesn't fail" \
-      || { fail "a11y: contrast, GTK 4, carousel"; cat "$tmp/contrast"; }
-    # From 4.14.6, where "check" can be takes in "unchecked" under it:
-    # "unchecked" is found, "check" inside it being no match for all of
-    # it, and "check", matching in both, is taken at its own, the other
-    # being inside "unchecked", found: passing, and faint, failing there.
     if [ $((minor * 100 + micro)) -ge 1406 ]; then
-      for args in nested "nested pale"; do
-        "$sb" run --a11y -- sh -c "'$app' $args & '$sb' wait window a11y-test >/dev/null &&
-          '$sb' a11y contrast --passes" < /dev/null 2>/dev/null || true
-      done > "$tmp/contrast"
-      [ "$(grep -c '/panel\[7\]/label\[1\]: text passes at .*; found ' "$tmp/contrast")" = 2 ] \
-        && grep -q '/panel\[7\]/label\[0\]: text passes at .*; found ' "$tmp/contrast" \
-        && grep -q '/panel\[7\]/label\[0\]: text 2\.[0-9]*:1, #a0a0a0 on .*; found ' "$tmp/contrast" \
-        && ok "a11y: contrast, GTK 4: text found though shorter text inside it matches there; the shorter at its own place" \
-        || { fail "a11y: contrast, GTK 4, check over unchecked"; cat "$tmp/contrast"; }
-      # Under "Recheck", whose text holds it, "check"'s own place is in
-      # doubt: a faint one fails in both places only over a faint
-      # "unchecked", at the better one; where one passes, it's still a
-      # note. Without --window, which would fail it as not found but faint.
-      for args in "nested recheck pale" "nested recheck pale both"; do
-        "$sb" run --a11y -- sh -c "'$app' $args & '$sb' wait window a11y-test >/dev/null &&
-          '$sb' a11y contrast --passes" < /dev/null 2>/dev/null || true
-      done > "$tmp/contrast"
-      grep -q '/label\[1\]: text 2\.[0-9]*:1 at best, #a0a0a0 on .*; it matches in two places and fails in both; found ' "$tmp/contrast" \
-        && [ "$(grep -c '/label\[1\]: text not measured: GTK 4 reports its position wrong (it matches elsewhere too, in "unchecked")$' "$tmp/contrast")" = 1 ] \
-        && ok "a11y: contrast, GTK 4: text matching in two places fails where it fails in both, else not" \
-        || { fail "a11y: contrast, GTK 4, faint check over unchecked"; cat "$tmp/contrast"; }
-      # Blinking, and not drawn when first pictured, it's looked for in
-      # the pictures after: where it's in doubt it's taken as in the
-      # first, only to fail in both places, so it's measured over a faint
-      # "unchecked" (taken: the line ends at its colors). Over one that
-      # passes, it isn't, but what's there bounds it, so it's changing,
-      # as found outright, failing only with --strict. Run till a first
-      # picture misses it, as one that catches it measures it as above,
-      # each a little later, so that they fall all around the blink.
-      for args in "nested recheck pale" "nested recheck pale both"; do
-        for i in 1 2 3 4 5 6 7 8; do
-          "$sb" run --a11y -- sh -c "'$app' $args blink & '$sb' wait window a11y-test >/dev/null &&
-            sleep 0.$i && '$sb' a11y contrast --window a11y-test" < /dev/null 2>/dev/null > "$tmp/blink" || true
-          grep -q '/label\[1\]: text \(changing: \|.* changing from 1\.0.* (at least 4\.5)$\)' "$tmp/blink" && break
-        done
-        cat "$tmp/blink"
-      done > "$tmp/contrast"
-      grep -q '/label\[1\]: text changing: 1\.0[0-9]:1 to 1[0-9]\.[0-9]*:1 (at least 4\.5)$' "$tmp/contrast" \
-        && grep -q '/label\[1\]: text 2\.[0-9]*:1 at best, changing from 1\.0[0-9]:1, #a0a0a0 on #[0-9a-f]* (at least 4\.5)$' "$tmp/contrast" \
-        && ok "a11y: contrast, GTK 4: text blinking, matching in two places, is taken in later pictures only to fail in both" \
-        || { fail "a11y: contrast, GTK 4, blinking check over unchecked"; cat "$tmp/contrast"; }
-      # Under "Recheck", whose room takes in both, "check" names the node
-      # where its other match is. A hidden "Open File" isn't taken for
-      # "Open" and "File" drawn side by side under it: "Open" is drawn
-      # only there.
-      for args in "nested recheck" split; do
-        "$sb" run --a11y -- sh -c "'$app' $args & '$sb' a11y contrast --passes --window a11y-test" \
-          < /dev/null 2>/dev/null || true
-      done > "$tmp/contrast"
-      grep -q '/label\[1\]: text not measured: GTK 4 reports its position wrong (it matches elsewhere too, in "unchecked")$' "$tmp/contrast" \
-        && grep -q '/panel\[7\]/label\[0\]: text not measured: GTK 4 reports its position wrong (another node.s text matches there too: "Open")$' "$tmp/contrast" \
-        && ok "a11y: contrast, GTK 4: the other match's own node named; text not taken for pieces of it drawn only there" \
-        || { fail "a11y: contrast, GTK 4, Recheck and Open File"; cat "$tmp/contrast"; }
-      # A faint "Twin" over an entry holding "Twin", or under it, each
-      # in the other's room, the entry's text where nothing else can draw
-      # it: found where it's drawn, and failing. Nothing else is measured:
-      # not a hidden "Twin" over the label, nor, where GTK says what's in
-      # a box padded above is over what's laid on its top (over), a label
-      # there or a hidden one, with a label, a drawing area or a label
-      # named otherwise on top.
-      for args in twin "twin under" "twin hidden" over "over hidden" "over hidden drawn" \
-          "over drawn" "over named"; do
-        "$sb" run --a11y -- sh -c "'$app' $args & '$sb' a11y contrast --passes --window a11y-test" \
-          < /dev/null 2>/dev/null || true
-      done > "$tmp/contrast"
-      grep -q '/panel\[7\]/panel\[0\]/label\[0\]: text 2\.[0-9]*:1, #a0a0a0 on .*; found 0,0 px' "$tmp/contrast" \
-        && grep -q '/panel\[7\]/panel\[1\]/label\[0\]: text 2\.[0-9]*:1, #a0a0a0 on .*; found 0,0 px' "$tmp/contrast" \
-        && [ "$(grep -c '/panel\[7\]/.*: text \(passes\|[0-9]\)' "$tmp/contrast")" = 2 ] \
-        && ok "a11y: contrast, GTK 4: text matching where only another node's text can be is found where it's drawn; not a hidden twin, nor where GTK's box is over it" \
-        || { fail "a11y: contrast, GTK 4, Twin"; cat "$tmp/contrast"; }
-      # An entry row's two title labels, at one place, one drawn: the
-      # one not drawn is said so, not failed for what's there, nor noted
-      # unmatched. Not said of a label not drawn over another text, nor
-      # apart from its own.
-      for args in titled "titled dark"; do
-        "$sb" run --a11y -- sh -c "'$app' $args & '$sb' a11y contrast --passes --window a11y-test" \
-          < /dev/null 2>/dev/null || true
-      done > "$tmp/contrast"
-      [ "$(grep -c '/list item\[0\]/panel\[0\]/panel\[0\]/label\[1\]: text \(passes at \)\?[0-9]' "$tmp/contrast")" = 2 ] \
-        && grep -q '/list item\[0\]/panel\[0\]/panel\[0\]/label\[1\]: text passes at 1[0-9.]*:1, #202020 ' "$tmp/contrast" \
-        && [ "$(grep -c '/list item\[0\]/panel\[0\]/panel\[0\]/label\[0\]: text not measured: GTK 4 reports its position wrong (another node with its text is drawn where it is instead)$' "$tmp/contrast")" = 2 ] \
-        && [ "$(grep -c 'drawn where it is instead' "$tmp/contrast")" = 2 ] \
+      # libadwaita's entry row: two title labels at one place, one drawn,
+      # the one not drawn said so, its twin measured (the rule's cases are
+      # test/contrast_gtk4_test.py's).
+      "$sb" run --a11y -- sh -c "'$app' titled & '$sb' a11y contrast --passes --window a11y-test" \
+        < /dev/null > "$tmp/contrast" 2>/dev/null || true
+      grep -q '/list item\[0\]/panel\[0\]/panel\[0\]/label\[1\]: text [0-9]' "$tmp/contrast" \
+        && grep -q '/list item\[0\]/panel\[0\]/panel\[0\]/label\[0\]: text not measured: GTK 4 reports its position wrong (another node with its text is drawn where it is instead)$' "$tmp/contrast" \
+        && [ "$(grep -c 'drawn where it is instead' "$tmp/contrast")" = 1 ] \
         && ok "a11y: contrast, GTK 4: an entry row's title not drawn is said so, its twin measured" \
         || { fail "a11y: contrast, GTK 4, entry row titles"; cat "$tmp/contrast"; }
     fi
-    # --strict: a window where nothing's measured but what fails, exit 1
-    # with the failure, not 2, "nothing measured".
-    set +e
-    "$sb" run --a11y -- sh -c "'$app' lone & '$sb' a11y contrast --strict --window a11y-test" \
-      < /dev/null > "$tmp/contrast" 2>/dev/null
-    st=$?; set -e
-    [ $st = 1 ] && grep -q ': text not found, but nothing where it can be' "$tmp/contrast" \
-      && ok "a11y: contrast --strict fails what fails, where nothing else is measured" \
-      || { fail "a11y: contrast --strict, lone ($st)"; cat "$tmp/contrast"; }
-    # --strict fails what isn't measured (GTK 4's edges), but rows
-    # scrolled out of view stay notes, as GTK 3 and browsers say nothing
-    # of theirs.
-    "$sb" run --a11y -- sh -c "'$app' long down & '$sb' a11y contrast --strict --edges 3 --json --window a11y-test" \
-      < /dev/null > "$tmp/contrast.json" 2>/dev/null
-    python3 -c "import json, sys; j = json.load(open(sys.argv[1]))
-assert j['problems'] and not any('not shown' in p['problem'] for p in j['problems']), j
-assert j['notes'] and all('not shown' in n['note'] for n in j['notes']), j" "$tmp/contrast.json" \
-      && ok "a11y: contrast --strict fails what isn't measured, not rows scrolled out of view" \
-      || { fail "a11y: contrast --strict, scrolled"; cat "$tmp/contrast.json"; }
+    # GTK's scrolled list: rows scrolled out of view, which GTK calls
+    # showing, above the list but in the window, and below the window,
+    # said not shown, once it's scrolled.
+    "$sb" run --a11y -- sh -c "'$app' long down & '$sb' wait window a11y-test >/dev/null &&
+      sleep 1 && '$sb' a11y contrast --window a11y-test" \
+      < /dev/null > "$tmp/contrast" 2>&1 || true
+    [ "$(grep -c '/label\[\(2\|199\)\]: text not measured: not shown (scrolled out of view, or hidden)$' "$tmp/contrast")" = 2 ] \
+      && ok "a11y: contrast, GTK 4: rows scrolled out of view are said not shown" \
+      || { fail "a11y: contrast, GTK 4, rows scrolled out of view"; cat "$tmp/contrast"; }
   fi
   # Before 4.14, GTK 4 says where a widget's content is: measured there,
   # faint labels in frames, one GTK can't pick, one under an overlay's
@@ -2047,35 +1904,6 @@ bad = [m for m, ok in [
     ("Hid", noted("Hid", "partly out of view"))] if not ok]
 print(*bad, *[f"{k}: {v.get('problem') or v.get('contrast') or v.get('note')}"
               for k, v in said.items()], sep="\n")
-sys.exit(bool(bad))
-PY
-    # Text found in two places, one inside where another's text is found
-    # (gtk4_window.py owned): taken at the other, "tick" passing and "dim"
-    # failing, as any found once. Not the first "pair", whose other place
-    # is the second's, not taken; nor the second, whose other place is in
-    # "unpair", as looked for again at the one left, the first's room
-    # reaches it. And text another node holds too, found where only that
-    # one's room reaches as well: "Same" passing and "Pale" failing.
-    "$sb" run --a11y -- sh -c "'$here/gtk4_window.py' owned & '$sb' wait window gtk4-owned >/dev/null &&
-      sleep 1 && '$sb' a11y contrast --passes --window gtk4-owned --json" > "$tmp/owned" 2>/dev/null || true
-    python3 - "$tmp/owned" <<'PY' && ok "a11y: contrast, GTK 4 text found where another's is found is taken at its other place" \
-      || { fail "a11y: contrast, GTK 4 text where another's is found"; cat "$tmp/owned"; }
-import json, sys
-got = json.load(open(sys.argv[1]))
-said = {(n["name"], n["path"].split("/")[-2]): n.get("contrast") or n.get("problem") or n.get("note")
-        for k in ("problems", "passes", "notes") for n in got[k] if n["role"] == "label"}
-def passes(name, parent):
-    line = said.get((name, parent), "")
-    return line.startswith("text passes at ") and "#101010 on #f0f0f0" in line
-def fails(name, parent):
-    line = said.get((name, parent), "")
-    return line.startswith("text 1.") and "#c8c8c8 on #f0f0f0" in line and "at best" not in line
-bad = [m for m, ok in [
-    ("tick", passes("tick", "check box[0]")), ("dim", fails("dim", "check box[0]")),
-    ("first pair", "matches elsewhere too" in said.get(("pair", "check box[0]"), "")),
-    ("second pair", "matches elsewhere too, in \"unpair\"" in said.get(("pair", "check box[1]"), "")),
-    ("Same", passes("Same", "panel[3]")), ("Pale", fails("Pale", "panel[4]"))] if not ok]
-print(*bad, *[f"{k}: {v}" for k, v in said.items()], sep="\n")
 sys.exit(bool(bad))
 PY
   else

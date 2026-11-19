@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """A libadwaita window to read the accessible tree of: test/a11y_app.py
 [fixed] [notes] [trap] [dialog] [lists] [one] [unfocusable] [untitled] [second] [faint]
-[thin] [long [down]] [keys] [form] [decoys] [lines] [letter] [carousel] [nested [recheck] [pale [both]]] [split] [twin [hidden] [under]] [over [hidden] [drawn | named]] [lone] [slow] [alert]
+[thin] [long [down]] [keys] [form] [decoys] [lines] [twin] [titled] [slow] [alert]
 [freeze] [ready [late]] [modal] [warned] [paged] [drawing] [fading]. Its icon-only button,
 its status icon and its drawing area have no accessible name unless
 `fixed`, nor has the window with `untitled`, and `second` opens an
@@ -18,23 +18,11 @@ themselves as one; `form` adds a field
 named by a label with a mnemonic, `decoys` faint labels drawn otherwise
 than their font says (letter-spaced, upper case), each over an entry
 holding its text or showing it as a placeholder, or a drawing area
-drawing it (not all ASCII), `lines` a button labeled over two lines,
-`letter` a label of one letter, `carousel` a carousel at its second
-page, the first's label outside the window, `nested` "check" over
-"unchecked" (under "Recheck" with `recheck`; with `pale` "check" faint,
-and with `both` "unchecked" too), padded below as the decoys are, `split` a hidden
-"Open File" over "Open" and "File" side by side, padded so too;
-`twin` a faint "Twin" over an entry holding it, in a box padded below
-alone, with `under` under it, with `hidden` a hidden "Twin" over the
-label; `over` a box padded above holding an entry holding "Twin", a
-faint "Twin" laid over the box's top, all padded far below. With
-`hidden`, `drawn` or `named`, the box holds a tall label "Twin"
-instead, and what's laid over its top draws "Twin": a label, a drawing
-area with `drawn`, or a label named "Brother" with `named`. With
-`hidden`, a hidden "Twin" is laid over the box's label too; without,
-the box's label is faint and an entry holding "Twin" is beside it all.
-`lone`
-an icon button and a faint letter-spaced label alone, `slow`
+drawing it (not all ASCII), `lines` a button labeled over two lines;
+`twin` a faint "Twin" over an entry holding it, in a box padded below;
+`titled` an entry row, its title in two labels, and a hidden
+"Ghost" over "Shown", beside a "Ghost" drawn and one hidden.
+`slow`
 moves the focus a second after Tab, and `alert` says an error
 and asks in an alert dialog as it starts, again once answered, then
 holds a button that makes a toast; `freeze`, a button that stops it
@@ -58,7 +46,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, GLib, Gtk, Pango, PangoCairo  # noqa: E402
+from gi.repository import Adw, Gdk, GLib, Gtk, PangoCairo  # noqa: E402
 
 
 def lists():
@@ -127,8 +115,6 @@ def activate(app):
                          " label.spaced { letter-spacing: 2px; }"
                          " label.upper { text-transform: uppercase; }"
                          " box.decoy { padding: 4px 4px 40px; } box.twin { padding: 0 0 40px; }"
-                         " box.over { padding-top: 40px; } label.tall { min-height: 40px; }"
-                         " box.far { padding-bottom: 100px; } list.dark label { color: #202020; opacity: 1; }"
                          " label.ghost { font-family: monospace; }")
     faint.add_css_class("faint")
     thin.add_css_class("thin")
@@ -160,8 +146,6 @@ def activate(app):
             box.append(pair)
     if "lines" in sys.argv:
         box.append(Gtk.Button(label="Line one\nLine two"))
-    if "letter" in sys.argv:
-        box.append(Gtk.Label(label="x"))
     notes = Gtk.TextView()
     notes.get_buffer().set_text("notes")
     notes.get_buffer().connect("changed", lambda b: print(repr(b.props.text), flush=True))
@@ -186,43 +170,17 @@ def activate(app):
         box = Gtk.ScrolledWindow(child=rows, vexpand=True)
         if "down" in sys.argv:
             GLib.timeout_add(300, lambda: box.get_vadjustment().set_value(60) and False)
-    if "nested" in sys.argv:
-        pair = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, css_classes=["decoy"])
-        pale = ("check", "unchecked")[:("pale" in sys.argv) + ("both" in sys.argv)]
-        for text in ("Recheck", "check", "unchecked")[("recheck" not in sys.argv):]:
-            pair.append(Gtk.Label(label=text, halign=Gtk.Align.START,
-                                  css_classes=["faint"] if text in pale else []))
-        box.append(pair)
-        if "blink" in sys.argv:
-            GLib.timeout_add(600, lambda: pair.set_opacity(1 - pair.get_opacity()) or True)
-    if "split" in sys.argv:
-        pair = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, css_classes=["decoy"])
-        whole = Gtk.Label(label="Open File", opacity=0, halign=Gtk.Align.START)
-        pair.append(whole)
-        # What "Open File" sets between the end of "Open"'s label and its
-        # "F", in whatever font there is, so "File" is drawn where "Open
-        # File" draws it.
-        gap = (whole.create_pango_layout("Open File").index_to_pos(5).x / Pango.SCALE
-               - whole.create_pango_layout("Open").get_pixel_size()[0])
-        side = Gtk.Box(spacing=round(gap))
-        for text in ("Open", "File"):
-            side.append(Gtk.Label(label=text))
-        pair.append(side)
-        box.append(pair)
     if "twin" in sys.argv:
         pair = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, css_classes=["twin"])
         twin = Gtk.Overlay(child=Gtk.Label(label="Twin", css_classes=["faint"]),
                            halign=Gtk.Align.START)
-        if "hidden" in sys.argv:
-            twin.add_overlay(Gtk.Label(label="Twin", opacity=0))
         pair.append(twin)
-        pair.insert_child_after(Gtk.Entry(text="Twin", halign=Gtk.Align.START),
-                                None if "under" in sys.argv else twin)
+        pair.append(Gtk.Entry(text="Twin", halign=Gtk.Align.START))
         box.append(pair)
     if "titled" in sys.argv:
         # An entry row has two title labels, one drawn at a time: filled,
-        # the small one over its text; dark, it passes.
-        rows = Gtk.ListBox(css_classes=["boxed-list"] + ["dark"] * ("dark" in sys.argv))
+        # the small one over its text.
+        rows = Gtk.ListBox(css_classes=["boxed-list"])
         rows.append(Adw.EntryRow(title="Display name", text="Neon Doll"))
         box.append(rows)
         # Not drawn, but neither where another node with its text is: over
@@ -233,35 +191,6 @@ def activate(app):
         box.append(Gtk.Label(label="Ghost", halign=Gtk.Align.START))
         box.append(Gtk.Label(label="Ghost", opacity=0, css_classes=["ghost"],
                              halign=Gtk.Align.START, margin_top=40))
-    if "over" in sys.argv:
-        # GTK 4.14.6 and later say what's in the box is 40 px up, over
-        # what's laid over its top.
-        hidden = "hidden" in sys.argv
-        drawing = "drawn" in sys.argv or "named" in sys.argv
-        inside = Gtk.Box(css_classes=["over"], halign=Gtk.Align.START, valign=Gtk.Align.START)
-        inside.append(Gtk.Label(label="Twin", css_classes=["tall"] + ([] if hidden else ["faint"]))
-                      if hidden or drawing else Gtk.Entry(text="Twin"))
-        over = Gtk.Overlay(child=inside, halign=Gtk.Align.START)
-        top = drawn("Twin") if "drawn" in sys.argv else Gtk.Label(
-            label="Twin", css_classes=[] if hidden or drawing else ["faint"])
-        if "named" in sys.argv:
-            top.update_property([Gtk.AccessibleProperty.LABEL], ["Brother"])
-        top.set_halign(Gtk.Align.START)
-        top.set_valign(Gtk.Align.START)
-        over.add_overlay(top)
-        if hidden:
-            over.add_overlay(Gtk.Label(label="Twin", opacity=0, margin_top=40, css_classes=["tall"],
-                                       halign=Gtk.Align.START, valign=Gtk.Align.START))
-        pair = Gtk.Box(css_classes=["far"])
-        if drawing and not hidden:
-            pair.append(Gtk.Entry(text="Twin", valign=Gtk.Align.END, width_chars=4))
-        pair.append(over)
-        box.append(pair)
-    if "carousel" in sys.argv:
-        box = Adw.Carousel()
-        for text in ("Before", "Shown"):
-            box.append(Gtk.Label(label=text, hexpand=True, vexpand=True))
-        GLib.timeout_add(300, lambda: box.scroll_to(box.get_nth_page(1), False) and False)
     if "keys" in sys.argv:
         box = Gtk.Box()
         for label in ("1", "2", ".", "+", "(Draft)"):
@@ -274,10 +203,6 @@ def activate(app):
         view.append(Gtk.Button(label="Save"))
         if "unfocusable" in sys.argv:
             view.append(Gtk.Button(label="Play", focusable=False))
-    if "lone" in sys.argv:
-        view = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        view.append(Gtk.Button(icon_name="edit-delete-symbolic", tooltip_text="Delete"))
-        view.append(Gtk.Label(label="Spaced out", css_classes=["faint", "spaced"]))
     if "freeze" in sys.argv:
         view = Gtk.Button(label="Freeze")
         view.connect("clicked", lambda b: GLib.timeout_add(100, lambda: time.sleep(30)))
