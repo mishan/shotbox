@@ -4015,7 +4015,7 @@ def saved_gtk4(d, paths):
     def load(name, need=True):
         try:
             with open(d / name) as f:
-                return json.load(f)
+                got = json.load(f)
         except FileNotFoundError:
             if need:
                 raise SessionError(f"can't read {d / name}: no such file") from None
@@ -4023,7 +4023,10 @@ def saved_gtk4(d, paths):
         except OSError as e:
             raise SessionError(f"can't read {d / name}: {e.strerror}") from None
         except ValueError:
-            raise SessionError(f"{d / name} isn't what contrast --save writes") from None
+            got = None
+        if got is None:
+            raise SessionError(f"{d / name} isn't what contrast --save writes")
+        return got
 
     def ints(v, n):
         return isinstance(v, list) and len(v) == n and all(type(i) is int for i in v)
