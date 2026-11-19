@@ -168,8 +168,8 @@ for case, size, kw in [
         check(True, f"watch(): {case}: {e}")
 
 # The live fixtures' patterns (test/patterns.py), drawn offline at exact
-# times: a frame as the watch starts, 7 ms into the pattern, then at each
-# of its ticks, for 1.6 s, as live.
+# times, as the live window draws them: as the watch starts, 7 ms into
+# the pattern, the tick before, then each tick, for 1.6 s.
 try:
     import cairo
 
@@ -182,7 +182,7 @@ def render(name, args=(), start=7, seconds=1.6):
     tick, draw = patterns.PATTERNS[name](list(args)) if isinstance(name, str) else name
     for ms in [start] + [m for m in range(tick, start + int(seconds * 1000), tick) if m > start]:
         surface = cairo.ImageSurface(cairo.FORMAT_RGB24, patterns.W, patterns.H)
-        draw(cairo.Context(surface), ms)
+        draw(cairo.Context(surface), ms // tick * tick)
         surface.flush()
         yield (ms - start) / 1000, rgb_of(surface)
 
