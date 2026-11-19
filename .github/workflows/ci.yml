@@ -132,6 +132,7 @@ jobs:
           SHOTBOX_GAMEPAD: required
           SHOTBOX_CLOCK: required
           SHOTBOX_ORCA: required
+          SHOTBOX_CAIRO: required
           SHOTBOX_TEST_FAILED: ${{ runner.temp }}/failed
       - if: failure()
         uses: actions/upload-artifact@v7
