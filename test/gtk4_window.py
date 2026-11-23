@@ -13,7 +13,8 @@ toolkit KIT, answering it from a thread of its own; on SIGUSR1, its main
 thread is busy for SECONDS (WHAT main), or its bus thread is (bus), or
 that, then it leaves the bus (leave). `empty` is a window, gtk4-empty, of a
 button and below it a group named Nothing with nothing in it, 0 pixels
-tall."""
+tall. `themed` is a window, gtk4-themed, of buttons Ok, Apply and
+Cancel in the default theme, none focusable, in a box padded 12 px."""
 
 import os
 import signal
@@ -68,6 +69,19 @@ def empty(app):
     nothing.update_property([Gtk.AccessibleProperty.LABEL], ["Nothing"])
     box.append(Gtk.Button(label="Go"))
     box.append(nothing)
+    w.set_child(box)
+    w.present()
+
+
+def themed(app):
+    w = Gtk.ApplicationWindow(application=app, title="gtk4-themed")
+    box = Gtk.Box(spacing=6, css_classes=["padded"])
+    for label in ("Ok", "Apply", "Cancel"):
+        box.append(Gtk.Button(label=label, can_focus=False))
+    provider = Gtk.CssProvider()
+    provider.load_from_string("box.padded { padding: 12px; }")
+    Gtk.StyleContext.add_provider_for_display(w.get_display(), provider,
+                                              Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
     w.set_child(box)
     w.present()
 
@@ -164,6 +178,7 @@ def fake(app):
 
 
 app = Gtk.Application(application_id="org.shotbox.Gtk4Old")
-app.connect("activate", {"glyphs": glyphs, "block": block, "fake": fake, "empty": empty}.get(
+app.connect("activate", {"glyphs": glyphs, "block": block, "fake": fake, "empty": empty,
+                         "themed": themed}.get(
     "".join(sys.argv[1:2]), activate))
 app.run([])
