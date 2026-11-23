@@ -64,7 +64,7 @@ def shape(text, size, dy=0):
 def paint(pic, name, drawn, color, spacing, size, dy=0):
     for y, row in enumerate(coverage(columns(name, spacing, size), dy)):
         for x, c in enumerate(row):
-            if c:
+            if c and 0 <= drawn[0] + x < pic.w and 0 <= drawn[1] + y < pic.h:
                 i = ((drawn[1] + y) * pic.w + drawn[0] + x) * 3
                 was = pic.data[i:i + 3]
                 pic.data[i:i + 3] = bytes(round(b * (1 - c) + f * c) for b, f in zip(was, color))
@@ -130,10 +130,19 @@ class Gtk4Window:
             paint(self.pic, draws or text or name, drawn, color, spacing, size, down)
         return self
 
-    def box(self, at, fill, later=None):
-        """A control's box at [x, y, w, h], filled `fill`, `later` in the
-        pictures after the first."""
-        clip(self.pic, *at, fill)
+    def box(self, at, fill=None, edge=None, width=1, later=None):
+        """A control's box at [x, y, w, h], filled `fill`, its edge `width`
+        px of `edge`, a color or one a side (top, right, bottom, left);
+        `later` the fill of all of it, edge too, in the pictures after the
+        first."""
+        x, y, w, h = at
+        if fill:
+            clip(self.pic, *at, fill)
+        top, right, bottom, left = edge if edge and len(edge) == 4 else [edge] * 4
+        for side, color in [((x, y, w, width), top), ((x, y + h - width, w, width), bottom),
+                            ((x, y, width, h), left), ((x + w - width, y, width, h), right)]:
+            if color:
+                clip(self.pic, *side, color)
         self.changes |= bool(later)
         if later:
             self.later.append(lambda pic: clip(pic, *at, later))
@@ -586,16 +595,17 @@ FAINTLY = dict(fill=(0xc0,) * 3, ink=(0xb0,) * 3)
 FLAT = dict(ink=(0x10,) * 3)
 
 
-def anchored(row, size, kids, move=(7, 9), pane=None, cut=0):
-    """A window of panel[`row`], `size` big, in the bordered box, holding
-    `kids`: (path under it, name, [x, y, w, h] in it, how it's drawn),
-    a container by no name and drawn None, a label by `laid` (x, y), a
-    graphic by DARKLY, FAINTLY or FLAT, `off` its icon from its middle,
+def in_box(row, size, kids, move=(7, 9), pane=None, cut=0, back=BACK):
+    """A window of `back` of panel[`row`], `size` big, in the bordered
+    box, holding `kids`: (path under it, name, [x, y, w, h], how it's
+    drawn), a container by no name and drawn None, a label by `laid` (x,
+    y) in `color`, a control by `fill`, `edge` and its `width`, and
+    `ink`, `off` its icon from its middle, its `role` and `states`;
     `later` how it's drawn after the first picture; each drawn `move`
     further. In a scroll pane `pane` wide, nothing's drawn past it; the
     window `cut` narrower than the box."""
     w, h = size[0] + 14, size[1] + 18
-    win = Gtk4Window("4.24.1", (w - cut, h), back=BACK)
+    win = Gtk4Window("4.24.1", (w - cut, h), back=back)
     win.add("frame/panel[0]", "panel", says=[0, 0, w, h])
     up = f"frame/panel[0]/{'scroll pane' if pane else 'panel'}[{row}]"
     win.add(up, "scroll pane" if pane else "panel", says=[0, 0, *size])
@@ -604,19 +614,19 @@ def anchored(row, size, kids, move=(7, 9), pane=None, cut=0):
             win.add(f"{up}/{path}", "panel", says=says)
             continue
         dx, dy = how.get("move", move)
-        at = [says[0] + dx, says[1] + dy, *says[2:]]
+        at, later = [says[0] + dx, says[1] + dy, *says[2:]], how.get("later", {})
         if "laid" in how:
             lx, ly = how["laid"]
-            win.add(f"{up}/{path}", "label", name, says, (at[0] + lx, at[1] + ly), WORDS, laid=(lx, ly))
+            win.add(f"{up}/{path}", "label", name, says, (at[0] + lx, at[1] + ly), how.get("color", WORDS),
+                    laid=(lx, ly))
         else:
-            win.add(f"{up}/{path}", "button", name, says)
-            later = how.get("later", {})
-            if "fill" in how:
-                win.box(at, how["fill"], later.get("fill"))
-            if "ink" in how:
-                win.icon(at, how["ink"], how.get("off", (0, 0)), later.get("ink"))
+            win.add(f"{up}/{path}", how.get("role", "button"), name, says, states=how.get("states", ()))
+        if "fill" in how or "edge" in how:
+            win.box(at, how.get("fill"), how.get("edge"), how.get("width", 1), later.get("fill"))
+        if "ink" in how:
+            win.icon(at, how["ink"], how.get("off", (0, 0)), later.get("ink"))
     if pane:
-        win.pic.fill(7 + pane, 0, w - cut - 7 - pane, h, BACK)
+        win.pic.fill(7 + pane, 0, w - cut - 7 - pane, h, back)
     return win
 
 
@@ -630,7 +640,7 @@ WRONG = "graphics not measured: GTK 4 reports its position wrong ("
 LAID = " px from where GTK 4.24.1 says its text is"
 ROWS = [
     ("by text found near them, if no container between has room; not where nothing's drawn",
-     anchored(0, (237, 34), [
+     in_box(0, (237, 34), [
          ("label[0]", "Plain words", [0, 0, 69, 34], dict(laid=(0, 7))),
          ("button[1]", "Faint", [75, 0, 36, 34], FAINTLY), ("button[2]", "Dark", [117, 0, 36, 34], DARKLY),
          ("button[3]", "Blank", [159, 0, 36, 34], {}), ("panel[4]", "", [201, 0, 36, 34], None),
@@ -642,14 +652,14 @@ ROWS = [
           "panel[0]/button[3]: " + WRONG + "nothing drawn where text near it puts it)"],
       "a graphic is measured where text found near it was moved to")),
     ("found drawn where it can be, beside a text button padded otherwise",
-     anchored(1, (123, 34), [
+     in_box(1, (123, 34), [
          ("button[0]", "Padded", [0, 0, 81, 34], dict(fill=(0xf9, 0xf8, 0xf8))),
          ("button[0]/label[0]", "Padded", [0, 0, 47, 24], dict(laid=(0, 2), move=(24, 14))),
          ("button[1]", "Beside", [87, 0, 36, 34], DARKLY)]),
      (0, ["panel[1]/button[0]/label[0]: text passes at 11.92:1, #2e3436 on #f9f8f8 (at least 4.5); found "
           "24,14" + LAID, "panel[1]/button[1]: " + GRAPHIC + "7,9" + DRAWN_AT])),
     ("as most siblings are found drawn, an icon low off its middle too, not one far off it",
-     anchored(2, (230, 40), [
+     in_box(2, (230, 40), [
          ("button[0]", "Up", [0, 0, 36, 40], DARKLY), ("button[1]", "Shut", [42, 0, 36, 40], DARKLY),
          ("button[2]", "Even", [84, 0, 36, 40], DARKLY),
          ("button[3]", "Low", [126, 0, 36, 40], dict(FLAT, off=(0, 2))),
@@ -658,22 +668,22 @@ ROWS = [
       + ["panel[2]/button[3]: " + ON_BACK + "12,9" + DRAWN_AT,
          "panel[2]/button[4]: " + WRONG + "not found drawn where it can be)"])),
     ("not where most aren't found",
-     anchored(3, (130, 34), [("button[0]", "Lone", [0, 0, 36, 34], DARKLY),
-                             ("button[1]", "Void", [42, 0, 36, 34], {}),
-                             ("button[2]", "Empty", [84, 0, 36, 34], {})], (12, 9)),
+     in_box(3, (130, 34), [("button[0]", "Lone", [0, 0, 36, 34], DARKLY),
+                           ("button[1]", "Void", [42, 0, 36, 34], {}),
+                           ("button[2]", "Empty", [84, 0, 36, 34], {})], (12, 9)),
      (2, [f"panel[3]/button[{i}]: " + WRONG + "not found drawn where it can be)" for i in range(3)])),
     ("not where siblings disagree",
-     anchored(4, (88, 26), [("button[0]", "Left", [0, 0, 36, 26], dict(FLAT, off=(-3, 0))),
-                            ("button[1]", "Right", [42, 0, 36, 26], dict(FLAT, off=(3, 0)))], (12, 9)),
+     in_box(4, (88, 26), [("button[0]", "Left", [0, 0, 36, 26], dict(FLAT, off=(-3, 0))),
+                          ("button[1]", "Right", [42, 0, 36, 26], dict(FLAT, off=(3, 0)))], (12, 9)),
      (2, [f"panel[4]/button[{i}]: " + WRONG + "not found drawn where it can be)" for i in range(2)])),
     ("faint, failing as found drawn with its siblings",
-     anchored(5, (82, 34), [("button[0]", "Pale", [0, 0, 36, 34], FAINTLY),
-                            ("button[1]", "Bold", [36, 0, 36, 34], DARKLY)], (12, 9)),
+     in_box(5, (82, 34), [("button[0]", "Pale", [0, 0, 36, 34], FAINTLY),
+                          ("button[1]", "Bold", [36, 0, 36, 34], DARKLY)], (12, 9)),
      (1, ["panel[5]/button[0]: graphics 1.19:1, #b0b0b0 on #c0c0c0 (at least 3); moved 12,9" + DRAWN_AT,
           "panel[5]/button[1]: " + GRAPHIC + "12,9" + DRAWN_AT],
       "measured where it and most of its siblings are found drawn")),
     ("found drawn, not partly scrolled out as GTK says",
-     anchored(6, (120, 34), [
+     in_box(6, (120, 34), [
          ("panel[0]", "", [0, 0, 120, 34], None), ("panel[0]/panel[0]", "", [0, 0, 152, 34], None),
          ("panel[0]/panel[0]/label[0]", "Scrolled further", [0, 0, 100, 34], dict(laid=(0, 7))),
          ("panel[0]/panel[0]/panel[1]", "", [106, 0, 46, 34], None),
@@ -681,14 +691,14 @@ ROWS = [
          pane=120),
      (0, ["scroll pane[6]/panel[0]/panel[0]/label[0]: " + TEXT_AT + "7,9" + LAID,
           "scroll pane[6]/panel[0]/panel[0]/panel[1]/button[0]: " + WRONG + "partly out of view)"])),
-    *[(f"found drawn {how}", anchored(row, (w, 34), [
+    *[(f"found drawn {how}", in_box(row, (w, 34), [
         ("panel[0]", "", [0, 0, w, 34], None), ("panel[0]/button[0]", name, [0, 0, 36, 34], DARKLY)]),
        (st, [f"panel[{row}]/panel[0]/button[0]: " + line]))
       for row, w, name, how, st, line in [
           (7, 54, "Roomy", "where its box has room 18 px across", 0, GRAPHIC + "7,9" + DRAWN_AT),
           (8, 55, "Roomier", "not where its box has room 19 px across: a neighbor could be found for it",
            2, WRONG + "too much room round it to find it)")]],
-    *[(f"not {how}", anchored(row, (120, 34), [
+    *[(f"not {how}", in_box(row, (120, 34), [
         ("panel[0]", "", [0, 0, 120, 34], None), ("panel[0]/panel[0]", "", [0, 0, wide, 34], None),
         ("panel[0]/panel[0]/label[0]", text, [0, 0, w, 34], dict(laid=(0, 7), move=move)),
         ("panel[0]/panel[0]/button[1]", name, [x, 0, 36, 34], dict(DARKLY, move=move))], pane=120),
@@ -699,17 +709,17 @@ ROWS = [
            "Scrolled across", 89, "Away", 95, (7, 9)),
           (10, "where text near it puts it past its scroll pane, though GTK says it's in it", 144,
            "Spilling", 70, "Over", 76, (23, 9))]],
-    ("found drawn, not where its room reaches out of its scroll pane", anchored(6, (120, 34), [
+    ("found drawn, not where its room reaches out of its scroll pane", in_box(6, (120, 34), [
         ("panel[0]", "", [0, 0, 120, 34], None), ("panel[0]/button[0]", "Inside", [0, 0, 36, 34], DARKLY)],
         pane=120),
      (2, ["scroll pane[6]/panel[0]/button[0]: " + WRONG + "partly out of view)"])),
     ("not where text near it puts only an icon off its middle",
-     anchored(11, (140, 26), [("label[0]", "Lopsided row", [0, 0, 82, 26], dict(laid=(0, 3))),
+     in_box(11, (140, 26), [("label[0]", "Lopsided row", [0, 0, 82, 26], dict(laid=(0, 3))),
                               ("button[1]", "Aside", [88, 0, 52, 26], dict(FLAT, off=(-11, 0)))]),
      (0, ["panel[11]/label[0]: " + TEXT_AT + "7,9" + LAID,
           "panel[11]/button[1]: " + WRONG + "no control drawn where text near it puts it)"])),
     ("blinking, faint then dark, changing",
-     anchored(12, (237, 114), [
+     in_box(12, (237, 114), [
          ("panel[0]", "", [0, 0, 138, 34], None),
          ("panel[0]/label[0]", "Blinking nearby", [0, 0, 96, 34], dict(laid=(0, 7))),
          ("panel[0]/button[1]", "Pulse", [102, 0, 36, 34], dict(FAINTLY, later=DARKLY))], (47, 49)),
@@ -720,24 +730,24 @@ ROWS = [
 WORDS_AT = ("label[0]", "Plain words", [0, 0, 69, 34], dict(laid=(0, 7)))
 DARK_AT = ("button[1]", "Dark", [75, 0, 36, 34], DARKLY)
 ROWS += [
-    ("found drawn where text near it is moved by different amounts", anchored(0, (183, 34), [
+    ("found drawn where text near it is moved by different amounts", in_box(0, (183, 34), [
         WORDS_AT, DARK_AT, ("label[2]", "Lower", [117, 0, 66, 34], dict(laid=(0, 7), move=(7, 12)))]),
      (0, ["panel[0]/label[0]: " + TEXT_AT + "7,9" + LAID,
           "panel[0]/button[1]: " + GRAPHIC + "7,9" + DRAWN_AT,
           "panel[0]/label[2]: " + TEXT_AT + "7,12" + LAID])),
     ("found drawn where text near it is found from its box's corner, not where GTK lays it",
-     anchored(0, (111, 34), [("label[0]", "+", [0, 0, 20, 34], dict(laid=(0, 7))), DARK_AT]),
+     in_box(0, (111, 34), [("label[0]", "+", [0, 0, 20, 34], dict(laid=(0, 7))), DARK_AT]),
      (0, ["panel[0]/label[0]: text passes at 11.61:1, #2e3436 on #f6f5f4 (at least 4.5); found 7,16 px from "
           "the corner of the box GTK 4.24.1 says", "panel[0]/button[1]: " + GRAPHIC + "7,9" + DRAWN_AT])),
-    ("not where text near it puts it past where it can be", anchored(0, (153, 34), [
+    ("not where text near it puts it past where it can be", in_box(0, (153, 34), [
         WORDS_AT, DARK_AT, ("button[2]", "Edge", [117, 0, 36, 34], DARKLY)], cut=10),
      (0, ["panel[0]/label[0]: " + TEXT_AT + "7,9" + LAID, "panel[0]/button[1]: " + GRAPHIC + "7,9" + NEAR,
           "panel[0]/button[2]: " + WRONG + "text found near it is moved further than it can be)"])),
-    ("not one too small to tell where it's drawn", anchored(0, (153, 34), [
+    ("not one too small to tell where it's drawn", in_box(0, (153, 34), [
         WORDS_AT, DARK_AT, ("button[2]", "Dot", [117, 0, 8, 8], DARKLY)]),
      (0, ["panel[0]/label[0]: " + TEXT_AT + "7,9" + LAID, "panel[0]/button[1]: " + GRAPHIC + "7,9" + NEAR,
           "panel[0]/button[2]: " + WRONG + "too small to tell where it's drawn)"])),
-    ("found drawn where most siblings are, an icon 4 px off its middle, not one 5", anchored(2, (256, 40), [
+    ("found drawn where most siblings are, an icon 4 px off its middle, not one 5", in_box(2, (256, 40), [
         *[(f"button[{i}]", name, [42 * i, 0, 36, 40], DARKLY)
           for i, name in enumerate(["Up", "Shut", "Even", "Ok"])],
         ("button[4]", "Lower", [168, 0, 36, 40], dict(FLAT, off=(0, 4))),
@@ -762,5 +772,159 @@ for case, win, (st, want, *why) in ROWS:
     if why:
         said = why[0] in got[2]
         check(said, f"contrast --from, GTK 4: graphics {case}, saying why" + ("" if said else f": {got[2]}"))
+
+# --edges on GTK 4: a control's edge where it's found framed exactly, at
+# the move most of its siblings are, not one framed elsewhere, nor where
+# another control could be, a disabled one too. Rows of framed buttons
+# and entries, flat ones beside frames their size, on #f0f0f0, a row a
+# window but a pair whose rooms reach each other's, laid out as GTK
+# 4.24.1 laid out them, saved live. A button's label is drawn 9,5 px in,
+# by its border and padding. In real fonts "More" is drawn as "Most"
+# nearly is, so they're found in each other's place; here they're not.
+RIM, FILL, FAINT_RIM = (0x40,) * 3, (0xe0,) * 3, (0xd0,) * 3
+FRAMED = dict(fill=FILL, edge=RIM)
+FAINTED = dict(fill=GRAY, edge=FAINT_RIM)
+FIELD = dict(FRAMED, role="text", states=["editable"])
+DECOY = dict(FRAMED, role="panel")
+
+
+def button(path, name, says, label, laid, how=FRAMED, move=(16, 14), color=INK):
+    """A button drawn `how`, and its label, `label` [w, h] at its corner,
+    laid `laid`, in `color`."""
+    return [(path, name, says, how),
+            (path + "/label[0]", name, [says[0], says[1], *label], dict(laid=laid, move=move, color=color))]
+
+
+def edged(row, size, kids, **kw):
+    """in_box() on #f0f0f0."""
+    return in_box(row, size, kids, back=GRAY, **kw)
+
+
+EDGED = [
+    ("framed at the move most siblings are, faint failing, thick and wide; flat, no edge",
+     edged(0, (440, 36), [
+        *button("button[0]", "Ok", [0, 0, 60, 36], [42, 26], (12, 3)),
+        *button("button[1]", "Apply", [66, 0, 60, 36], [42, 26], (3, 3)),
+        *button("button[2]", "Faintly", [132, 0, 58, 36], [40, 26], (0, 3), FAINTED),
+        *button("button[3]", "Thick", [196, 0, 51, 36], [31, 24], (0, 2), dict(FRAMED, width=2), (17, 15)),
+        *button("button[4]", "Plain", [253, 0, 47, 36], [29, 26], (0, 3), {})])),
+    ("siblings framed in different places", edged(1, (520, 34), [
+        *button("button[0]", "Most", [0, 0, 49, 34], [31, 24], (0, 2)),
+        *button("button[1]", "More", [55, 0, 51, 34], [33, 24], (0, 2)),
+        *button("button[2]", "Shifted", [112, 0, 70, 34], [52, 24], (4, 2), {}),
+        ("panel[3]", "", [188, 0, 70, 34], DECOY),
+        *button("button[4]", "Further", [264, 0, 76, 34], [58, 24], (5, 2), {}),
+        ("panel[5]", "", [346, 0, 76, 34], DECOY)])),
+    ("one framed elsewhere than most", edged(2, (440, 34), [
+        *button("button[0]", "Agree", [0, 0, 56, 34], [38, 24], (0, 2)),
+        *button("button[1]", "Also", [62, 0, 44, 34], [26, 24], (0, 2)),
+        *button("button[2]", "Again", [112, 0, 53, 34], [35, 24], (0, 2)),
+        *button("button[3]", "Apart", [171, 0, 60, 34], [42, 24], (3, 2), {}),
+        ("panel[4]", "", [237, 0, 60, 34], DECOY)])),
+    ("an entry", edged(3, (440, 34), [("text[0]", "Wide", [0, 0, 300, 34], FIELD)])),
+    ("filled and touching: no edge found", edged(4, (440, 40), [
+        *button("button[0]", "Tall", [0, 0, 200, 40], [184, 32], (82, 6), dict(fill=RIM), (15, 13), WHITE),
+        *button("button[1]", "Short", [200, 4, 200, 32], [184, 24], (75, 2), dict(fill=RIM), (15, 13),
+                WHITE)])),
+    ("a bevel, sides of two lightnesses: no edge", edged(5, (440, 34), [
+        *button("button[0]", "Bevel", [0, 0, 52, 34], [34, 24], (0, 2),
+                dict(fill=FILL, edge=(WHITE, RIM, RIM, WHITE)))])),
+    ("flat beside a disabled one, which doesn't vote: framed where another control can be",
+     edged(6, (440, 34), [
+        *button("button[0]", "Off", [0, 0, 60, 34], [42, 24], (11, 2), {}),
+        *button("button[1]", "Dim", [66, 0, 60, 34], [42, 24], (11, 2), dict(FRAMED, states=["disabled"]))])),
+    ("focused, its ring on its edge; a field's faint edge, what it's in not placed", edged(7, (440, 34), [
+        ("text[0]", "Typing", [0, 0, 168, 34], dict(FIELD, states=["editable", "focused"])),
+        ("text[1]", "Pale field", [174, 0, 168, 34], dict(FIELD, fill=GRAY, edge=FAINT_RIM))])),
+    ("framed where another control can be, and in more than one place", edged(8, (520, 120), [
+        ("panel[0]", "", [0, 0, 440, 34], None), ("panel[0]/panel[0]", "", [0, 0, 34, 34], None),
+        ("panel[0]/button[1]", "Hover", [40, 0, 34, 34], dict(ink=INK)),
+        ("panel[1]", "", [0, 40, 440, 34], None),
+        ("panel[1]/button[0]", "Twin", [0, 40, 34, 34], dict(FRAMED, ink=INK)),
+        ("panel[1]/panel[1]", "", [40, 40, 34, 34], DECOY)])),
+    ("filled and touching, one over the other: no edge found", edged(10, (200, 72), [
+        *button("button[0]", "Tall", [0, 0, 200, 40], [184, 32], (82, 6), dict(fill=RIM), (15, 13), WHITE),
+        *button("button[1]", "Short", [0, 40, 200, 32], [184, 24], (75, 2), dict(fill=RIM), (15, 13),
+                WHITE)])),
+    ("framed where most found framed are, beside flat ones", edged(11, (440, 34), [
+        *button("button[0]", "Ok", [0, 0, 60, 34], [42, 24], (12, 2)),
+        *button("button[1]", "Apply", [66, 0, 60, 34], [42, 24], (3, 2)),
+        *button("button[2]", "Plain", [132, 0, 47, 34], [29, 24], (0, 2), {}),
+        *button("button[3]", "Flat", [185, 0, 47, 34], [29, 24], (0, 2), {})])),
+    ("partly scrolled out", edged(9, (120, 34), [
+        ("panel[0]", "", [0, 0, 120, 34], None), ("panel[0]/panel[0]", "", [0, 0, 440, 34], None),
+        ("panel[0]/panel[0]/label[0]", "Scrolled further", [0, 0, 100, 34], dict(laid=(0, 7))),
+        *button("panel[0]/panel[0]/button[1]", "Hid", [106, 0, 39, 34], [21, 24], (0, 2))], pane=120)),
+]
+
+EDGE = "edge passes at 9.09:1, #404040 by #f0f0f0 (at least 3); moved 7,9" + DRAWN_AT
+EDGE_WRONG = "edge not measured: GTK 4 reports its position wrong ("
+INKED = "text passes at 14.41:1, #101010 on #e0e0e0 (at least 4.5); found "
+PLAINLY = "text passes at 16.69:1, #101010 on #f0f0f0 (at least 4.5); found "
+WHITELY = "text passes at 10.36:1, #ffffff on #404040 (at least 4.5); found "
+HOVER, TWIN = "panel[8]/panel[0]/button[1]: ", "panel[8]/panel[1]/button[0]: "
+EDGES = [
+    (1, ["panel[0]/button[2]: edge 1.35:1, #d0d0d0 by #f0f0f0 (at least 3); moved 7,9" + DRAWN_AT,
+         *[f"panel[0]/button[{i}]/label[0]: " + (PLAINLY if i in (2, 4) else INKED)
+           + ("17,15" if i == 3 else "16,14") + LAID for i in range(5)],
+         *[f"panel[0]/button[{i}]: " + EDGE for i in (0, 1, 3)],
+         "panel[0]/button[4]: " + EDGE_WRONG + "no edge found drawn where it can be)"],
+     "a control's edge is measured where it's found framed exactly, as most of its siblings are"),
+    (0, [*[f"panel[1]/button[{i}]/label[0]: " + (PLAINLY if i > 1 else INKED) + "16,14" + LAID
+           for i in (0, 1, 2, 4)],
+         *[f"panel[1]/button[{i}]: " + EDGE_WRONG + "its siblings found framed in different places)"
+           for i in (0, 1, 2, 4)]]),
+    (0, [*[f"panel[2]/button[{i}]/label[0]: " + (PLAINLY if i == 3 else INKED) + "16,14" + LAID
+           for i in range(4)],
+         *[f"panel[2]/button[{i}]: " + EDGE for i in range(3)],
+         "panel[2]/button[3]: " + EDGE_WRONG + "found framed elsewhere than most of its siblings)"]),
+    (0, ["panel[3]/text[0]: " + EDGE]),
+    (0, [*[f"panel[4]/button[{i}]/label[0]: " + WHITELY + "15,13" + LAID for i in range(2)],
+         *[f"panel[4]/button[{i}]: " + EDGE_WRONG + "no edge found drawn where it can be)"
+           for i in range(2)]]),
+    (0, ["panel[5]/button[0]/label[0]: " + INKED + "16,14" + LAID,
+         "panel[5]/button[0]: " + EDGE_WRONG + "no edge found drawn where it can be)"]),
+    (0, ["panel[6]/button[0]/label[0]: " + PLAINLY + "16,14" + LAID,
+         "panel[6]/button[0]: " + EDGE_WRONG + "found framed where another control can be)"]),
+    (2, ["panel[7]/text[0]: " + EDGE_WRONG + "its focus ring is drawn on its edge)",
+         "panel[7]/text[1]: " + EDGE_WRONG + "its own edge is faint, and what it's in can't be placed)"]),
+    (2, [HOVER + WRONG + "too much room round it to find it)",
+         TWIN + WRONG + "too much room round it to find it)",
+         HOVER + EDGE_WRONG + "found framed where another control can be)",
+         TWIN + EDGE_WRONG + "found framed in more than one place)"]),
+    (0, [*[f"panel[10]/button[{i}]/label[0]: " + WHITELY + "15,13" + LAID for i in range(2)],
+         *[f"panel[10]/button[{i}]: " + EDGE_WRONG + "no edge found drawn where it can be)"
+           for i in range(2)]]),
+    (0, [*[f"panel[11]/button[{i}]/label[0]: " + (PLAINLY if i > 1 else INKED) + "16,14" + LAID
+           for i in range(4)],
+         *[f"panel[11]/button[{i}]: " + EDGE for i in range(2)],
+         *[f"panel[11]/button[{i}]: " + EDGE_WRONG + "no edge found drawn where it can be)"
+           for i in (2, 3)]]),
+    (0, ["scroll pane[9]/panel[0]/panel[0]/label[0]: text passes at 11.09:1, #2e3436 on #f0f0f0 "
+         "(at least 4.5); found 7,9" + LAID,
+         loose(SAID + "scroll pane[9]/panel[0]/panel[0]/button[1]/label[0]: text " + NOTED
+               + " (no match good enough: 0.NN at best)"),
+         "scroll pane[9]/panel[0]/panel[0]/button[1]: " + EDGE_WRONG + "partly out of view)"]),
+]
+for (case, win), (st, want, *why) in zip(EDGED, EDGES, strict=True):
+    got = win.contrast("--edges", "3", "--passes")
+    run(f"--edges {case}", got, (st, [w if isinstance(w, re.Pattern) else SAID + w for w in want]))
+    if why:
+        said = why[0] in got[2]
+        check(said, f"contrast --from, GTK 4: --edges {case}, saying why" + ("" if said else f": {got[2]}"))
+
+# With --strict, an edge not measured fails, as other notes do.
+for args, st in [((), 0), (("--strict",), 1)]:
+    run(f"--edges, an edge not measured failing only with --strict ({' '.join(args)})",
+        EDGED[2][1].contrast(*args, "--edges", "3"),
+        (st, [SAID + "panel[2]/button[3]: " + EDGE_WRONG
+              + "found framed elsewhere than most of its siblings)"]))
+
+# Room so wide and tall round a control that looking everywhere it can be
+# would take too long: not looked for.
+roomy = in_box(0, (600, 480), [("button[0]", "Roomiest", [0, 0, 40, 40], FRAMED)], back=GRAY)
+run("--edges, not one with too much room round it to look for it", roomy.contrast("--edges", "3"),
+    (2, [SAID + "panel[0]/button[0]: " + WRONG + "too much room round it to find it)",
+         SAID + "panel[0]/button[0]: " + EDGE_WRONG + "too much room round it to find it)"]))
 
 sys.exit(bool(contrast_fixture.fails))
