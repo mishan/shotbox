@@ -1128,7 +1128,10 @@ are; `(partly out of view)`, `(too small to tell where it's drawn)`,
 be)`, for one not found near where most of its siblings are, or none
 with most of them found in one place; `(nothing drawn inside where it's
 found)`, a frame with nothing in it; and `(not looked for, past the 30
-seconds given to looking)`.
+seconds given to looking)`. One all out of view wherever it can be,
+outside its window or a scrolled window it's in, but not in a popover,
+isn't shown, as text there isn't: `graphics not measured: not shown
+(scrolled out of view, or hidden)`, which `--strict` leaves out.
 With `--edges`, a button's, entry's, spin button's or combo box's edge
 is measured, from 4.14.6, where it's found framed exactly: a box its
 size, from where GTK says to as far down and right as its containers'
@@ -1152,7 +1155,9 @@ where another control can be)`, as a flat button whose room reaches a
 framed one its size would be; `(its own edge is faint, and what it's in
 can't be placed)`, a field whose edge is under the ratio, where what's
 round it may draw one (above), but is put off less than it by its own
-padding; `(partly out of view)`, `(too small to tell where it's drawn)`,
+padding; `(partly out of view)`, or, all out of view, `edge not
+measured: not shown (scrolled out of view, or hidden)`, as a graphic is;
+`(too small to tell where it's drawn)`,
 `(too much room round it to find it)`, for more than 250,000 places to
 look; and `(not looked for, past the 30 seconds given to looking)`. A
 padded widget GTK leaves out of the tree, between a container and some

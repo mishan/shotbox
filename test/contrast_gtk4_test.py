@@ -937,4 +937,33 @@ run("--edges, not one with too much room round it to look for it", roomy.contras
     (2, [SAID + "panel[0]/button[0]: " + WRONG + "too much room round it to find it)",
          SAID + "panel[0]/button[0]: " + EDGE_WRONG + "too much room round it to find it)"]))
 
+# A control all out of view, wherever its room puts it, isn't shown, as its
+# label wouldn't be, and --strict leaves it out; one whose room reaches
+# into view, or in a popover, which can be drawn outside, fails it. Beside
+# words, as nothing measured fails.
+WORDED = ("label[1]", "Plain words", [0, 0, 69, 34], dict(laid=(0, 7)))
+GONE = [k + " not measured: not shown (scrolled out of view, or hidden)" for k in ("graphics", "edge")]
+PART = [WRONG + "partly out of view)", EDGE_WRONG + "partly out of view)"]
+SCROLLED = "scroll pane[1]/panel[0]/button[0]"
+
+
+def scrolled(name, x):
+    """A framed button `name` at `x` in a row scrolled 40 across."""
+    return edged(1, (120, 34), [("panel[0]", "", [-40, 0, 300, 34], None),
+                                ("panel[0]/button[0]", name, [x, 0, 36, 34], dict(FRAMED, ink=INK)), WORDED],
+                 pane=120)
+
+
+popped = scrolled("Popped", 200)
+popped.reads["popups"][SAID + "scroll pane[1]/panel[0]"] = True
+for case, win, path, st, said in [
+    ("past its scroll pane", scrolled("Gone", 200), SCROLLED, 0, GONE),
+    ("past its window", edged(0, (300, 34), [("button[0]", "Off", [250, 0, 36, 34], dict(FRAMED, ink=INK)),
+                                             WORDED], cut=64), "panel[0]/button[0]", 0, GONE),
+    ("GTK puts before its scroll pane, its room reaching in", scrolled("Before", -40), SCROLLED, 1, PART),
+    ("past its scroll pane, in a popover", popped, SCROLLED, 1, PART),
+]:
+    run(f"--strict --edges, a control {case}", win.contrast("--strict", "--edges", "3"),
+        (st, [f"{SAID}{path}: {line}" for line in said]))
+
 sys.exit(bool(contrast_fixture.fails))
