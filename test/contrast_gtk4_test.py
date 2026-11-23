@@ -86,14 +86,17 @@ class Gtk4Window:
         24 pixels, from its left and its bottom, as CSS's
         repeating-linear-gradient draws them."""
         self.release = tuple(map(int, release.split(".")))
-        self.pic = Pic(*size, back=back)
+        self.back, self.pic, self.draws, self.changes = back, Pic(*size, back=back), [], False
         w, h = size
-        for x in range(0, w, 24) if grid else ():
-            self.pic.fill(x, 0, 1, h, grid)
-        for y in range(h - 1, -1, -24) if grid else ():
-            self.pic.fill(0, y, w, 1, grid)
+
+        def lines(pic, later):
+            for x in range(0, w, 24):
+                pic.fill(x, 0, 1, h, grid)
+            for y in range(h - 1, -1, -24):
+                pic.fill(0, y, w, 1, grid)
+        if grid:
+            self.draw(lines)
         self.nodes = [window(toolkit=f"GTK {release}", bounds=[0, 0, *size], window=[0, 0, *size])]
-        self.blinking, self.later, self.changes = [], [], False
         self.reads = {k: {} for k in ("relative", "pages", "fonts", "laid", "paged", "popups", "texts")}
 
     def add(self, path, role, name="", says=None, drawn=None, color=FAINT, spacing=0, states=(),
@@ -124,10 +127,17 @@ class Gtk4Window:
         r["paged"][path] = path
         r["popups"][path] = False
         r["texts"][path] = [t for t in (None if labeled else name, text) if t]
-        if drawn and blink:
-            self.blinking.append((draws or text or name, drawn, color, spacing, size, down))
-        elif drawn:
-            paint(self.pic, draws or text or name, drawn, color, spacing, size, down)
+        self.changes |= bool(drawn and blink)
+        if drawn:
+            self.draw(lambda pic, later: (later or not blink) and paint(
+                pic, draws or text or name, drawn, color, spacing, size, down))
+        return self
+
+    def draw(self, how):
+        """how(pic, later) on the first picture, and on the one after,
+        `later`, in the order drawn."""
+        how(self.pic, False)
+        self.draws.append(how)
         return self
 
     def box(self, at, fill=None, edge=None, width=1, later=None):
@@ -136,42 +146,41 @@ class Gtk4Window:
         `later` the fill of all of it, edge too, in the pictures after the
         first."""
         x, y, w, h = at
-        if fill:
-            clip(self.pic, *at, fill)
         top, right, bottom, left = edge if edge and len(edge) == 4 else [edge] * 4
-        for side, color in [((x, y, w, width), top), ((x, y + h - width, w, width), bottom),
-                            ((x, y, width, h), left), ((x + w - width, y, width, h), right)]:
-            if color:
-                clip(self.pic, *side, color)
+
+        def drawn(pic, after):
+            if after and later:
+                clip(pic, *at, later)
+                return
+            if fill:
+                clip(pic, *at, fill)
+            for side, color in [((x, y, w, width), top), ((x, y + h - width, w, width), bottom),
+                                ((x, y, width, h), left), ((x + w - width, y, width, h), right)]:
+                if color:
+                    clip(pic, *side, color)
         self.changes |= bool(later)
-        if later:
-            self.later.append(lambda pic: clip(pic, *at, later))
-        return self
+        return self.draw(drawn)
 
     def icon(self, at, color, off=(0, 0), later=None):
         """An icon, a cross 12 px square, in `color`, centered in the box
         `at` [x, y, w, h] but `off` (dx, dy) from its middle; `later` its
-        color in the pictures after the first, drawn again there over a
-        box's."""
+        color in the pictures after the first."""
         x, y = at[0] + (at[2] - 12) // 2 + off[0], at[1] + (at[3] - 12) // 2 + off[1]
         self.changes |= bool(later)
 
-        def draw(pic, color):
+        def cross(pic, after):
+            ink = later if after and later else color
             for i in range(11):
-                clip(pic, x + i, y + i, 2, 2, color)
-                clip(pic, x + 10 - i, y + i, 2, 2, color)
-        draw(self.pic, color)
-        self.later.append(lambda pic: draw(pic, later or color))
-        return self
+                clip(pic, x + i, y + i, 2, 2, ink)
+                clip(pic, x + 10 - i, y + i, 2, 2, ink)
+        return self.draw(cross)
 
     def contrast(self, *args, trusted=False):
         """contrast --from what a live run would have saved of this window
         with `args` and --window, GTK's bounds `trusted`."""
-        later = self.pic.copy()
-        for d in self.blinking:
-            paint(later, *d)
-        for draw in self.later:
-            draw(later)
+        later = Pic(self.pic.w, self.pic.h, back=self.back)
+        for how in self.draws:
+            how(later, True)
         texts = {t for ts in self.reads["texts"].values() for t in ts}
         texts |= {n["name"] for n in self.nodes[1:] if n["name"]}
         if self.release >= (4, 22, 3):
@@ -197,7 +206,7 @@ class Gtk4Window:
             files.append(("fields.json", {"version": 1, "reads": {k: r[1] for k, r in apart.items()},
                                           "shapes": [x for x in shapes if x["text"] in typed]}))
         return contrast(self.nodes, self.pic, *args,
-                        samples=[(later, 0, 0)] * bool(self.blinking or self.changes),
+                        samples=[(later, 0, 0)] * self.changes,
                         files=files)
 
 
@@ -626,7 +635,7 @@ def in_box(row, size, kids, move=(7, 9), pane=None, cut=0, back=BACK):
         if "ink" in how:
             win.icon(at, how["ink"], how.get("off", (0, 0)), later.get("ink"))
     if pane:
-        win.pic.fill(7 + pane, 0, w - cut - 7 - pane, h, back)
+        win.draw(lambda pic, later: pic.fill(7 + pane, 0, w - cut - 7 - pane, h, back))
     return win
 
 
@@ -906,7 +915,8 @@ EDGES = [
                + " (no match good enough: 0.NN at best)"),
          "scroll pane[9]/panel[0]/panel[0]/button[1]: " + EDGE_WRONG + "partly out of view)"]),
 ]
-for (case, win), (st, want, *why) in zip(EDGED, EDGES, strict=True):
+assert len(EDGED) == len(EDGES), "a case each"
+for (case, win), (st, want, *why) in zip(EDGED, EDGES):
     got = win.contrast("--edges", "3", "--passes")
     run(f"--edges {case}", got, (st, [w if isinstance(w, re.Pattern) else SAID + w for w in want]))
     if why:

@@ -1506,6 +1506,21 @@ assert j['passes'] and all(p['contrast'].startswith(('text passes at ', 'graphic
     && grep -q "GTK 4\.[0-9.]* reports where its widgets are wrong, so text is measured where it's found" "$tmp/err" \
     && ok "a11y: contrast measures GTK 4's text where it's found, at its colors, a full-width label's near where GTK says, but not text it can't find or tell from another's; --passes and --json say what passes, and keep notes apart" \
     || { fail "a11y: contrast, GTK 4 text found ($st)"; cat "$tmp/contrast" "$tmp/decoys.json" "$tmp/err"; }
+  # From 4.14.6, which places graphics: its header bar's Minimize,
+  # Maximize and Close, real icons with no text near them to go by,
+  # found drawn where they can be.
+  if python3 -c "import ctypes, sys; g = ctypes.CDLL('libgtk-4.so.1')
+sys.exit((g.gtk_get_minor_version(), g.gtk_get_micro_version()) < (14, 6))"; then
+    python3 -c "import json, sys; j = json.load(open(sys.argv[1]))
+said = {p['name']: p['contrast'] for p in j['passes']}
+assert all(said.get(n, '').startswith('graphics passes at ')
+           and said[n].endswith(', as found drawn where it can be') for n in ('Minimize', 'Maximize', 'Close')), said" \
+      "$tmp/decoys.json" \
+      && ok "a11y: contrast, GTK 4: a header bar's icons found drawn where they can be" \
+      || { fail "a11y: contrast, GTK 4, a header bar's icons"; cat "$tmp/decoys.json"; }
+  else
+    echo "skip  a11y: contrast, GTK 4: a header bar's icons: GTK before 4.14.6"
+  fi
   # A theme's font (a seeded gtk.css), which GTK says, over a grid, so
   # nothing is all one lightness, in a window so big that from 4.14.6
   # each label is looked for in more than 600 by 200 pixels.
@@ -1744,15 +1759,6 @@ EOF
         && [ "$(grep -c 'drawn where it is instead' "$tmp/contrast")" = 1 ] \
         && ok "a11y: contrast, GTK 4: an entry row's title not drawn is said so, its twin measured" \
         || { fail "a11y: contrast, GTK 4, entry row titles"; cat "$tmp/contrast"; }
-      # A header bar's Minimize, Maximize and Close, real icons with no text
-      # near them to go by: found drawn where they can be.
-      python3 -c "import json, sys; j = json.load(open(sys.argv[1]))
-said = {p['name']: p['contrast'] for p in j['passes']}
-assert all(said.get(n, '').startswith('graphics passes at ')
-           and said[n].endswith(', as found drawn where it can be') for n in ('Minimize', 'Maximize', 'Close')), said" \
-        "$tmp/decoys.json" \
-        && ok "a11y: contrast, GTK 4: a header bar's icons found drawn where they can be" \
-        || { fail "a11y: contrast, GTK 4, a header bar's icons"; cat "$tmp/decoys.json"; }
       # The default theme's buttons, shadowed, their corners rounded and
       # antialiased a pixel or two in, in a box padded 12 px: each edge
       # found framed 12,12 px from where GTK says, at a color unlike
@@ -1770,7 +1776,7 @@ for n in ('Ok', 'Apply', 'Cancel'):
         && ok "a11y: contrast --edges, GTK 4: the default theme's buttons found framed where they are" \
         || { fail "a11y: contrast --edges, GTK 4, the default theme's buttons"; cat "$tmp/themed.json" "$tmp/err"; }
     else
-      echo "skip  a11y: contrast, GTK 4 graphics and edges against real rendering: GTK 4.$minor.$micro, before 4.14.6"
+      echo "skip  a11y: contrast --edges, GTK 4: the default theme's buttons: GTK 4.$minor.$micro, before 4.14.6"
     fi
     # GTK's scrolled list: rows scrolled out of view, which GTK calls
     # showing, above the list but in the window, and below the window,
