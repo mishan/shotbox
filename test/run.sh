@@ -1489,7 +1489,7 @@ EOF
   set +e
   "$sb" run --a11y -- sh -c "'$app' faint lines decoys &
     '$sb' a11y contrast --passes --window a11y-test; s=\$?
-    '$sb' a11y contrast --passes --json --window a11y-test > '$tmp/contrast.json' && exit \$s" \
+    '$sb' a11y contrast --passes --json --window a11y-test > '$tmp/decoys.json' && exit \$s" \
     > "$tmp/contrast" 2> "$tmp/err"
   st=$?; set -e
   [ $st = 1 ] && [ "$(grep -v " not measured: GTK 4 reports its position wrong\|$unfound" "$tmp/contrast" | grep -cv ': \(text\|graphics\) passes at ')" = 1 ] \
@@ -1498,14 +1498,29 @@ EOF
 assert [p['problem'][:8] for p in j['problems'] if 'not found' not in p['problem']] == ['text 2.5'], j['problems']
 assert all(p['why'] for p in j['problems'] if 'not found' in p['problem'])
 assert j['notes'] and all(' not measured: ' in n['note'] and n['why'] for n in j['notes'])
-assert j['passes'] and all(p['contrast'].startswith(('text passes at ', 'graphics passes at ')) for p in j['passes'])" "$tmp/contrast.json" \
+assert j['passes'] and all(p['contrast'].startswith(('text passes at ', 'graphics passes at ')) for p in j['passes'])" "$tmp/decoys.json" \
     && grep -q '/label\[[0-9]*\]: text 2\.5[01]:1, #a0a0a0 on #fafaf[ab] (at least 4\.5); found -\?[0-9]*,-\?[0-9]* px from \(where GTK 4\.[0-9.]* says its text is\|the corner of the box GTK 4\.[0-9.]* says\)$' "$tmp/contrast" \
     && grep -q 'button\[[0-9]*\]/label\[0\]: text not measured: GTK 4 reports its position wrong' "$tmp/contrast" \
     && grep -q 'check box\[[0-9]*\]/label\[[0-9]*\]: text passes at .*; found [0-9],[0-9] px from ' "$tmp/contrast" \
     && [ "$(grep -c "/panel\[[0-9]*\]/label\[0\]: text \(not measured: GTK 4 reports its position wrong\|$unfound\)" "$tmp/contrast")" = 4 ] \
     && grep -q "GTK 4\.[0-9.]* reports where its widgets are wrong, so text is measured where it's found" "$tmp/err" \
     && ok "a11y: contrast measures GTK 4's text where it's found, at its colors, a full-width label's near where GTK says, but not text it can't find or tell from another's; --passes and --json say what passes, and keep notes apart" \
-    || { fail "a11y: contrast, GTK 4 text found ($st)"; cat "$tmp/contrast" "$tmp/contrast.json" "$tmp/err"; }
+    || { fail "a11y: contrast, GTK 4 text found ($st)"; cat "$tmp/contrast" "$tmp/decoys.json" "$tmp/err"; }
+  # From 4.14.6, which places graphics: its header bar's Minimize,
+  # Maximize and Close, real icons with no text near them to go by,
+  # found drawn where they can be.
+  if python3 -c "import ctypes, sys; g = ctypes.CDLL('libgtk-4.so.1')
+sys.exit((g.gtk_get_minor_version(), g.gtk_get_micro_version()) < (14, 6))"; then
+    python3 -c "import json, sys; j = json.load(open(sys.argv[1]))
+said = {p['name']: p['contrast'] for p in j['passes']}
+assert all(said.get(n, '').startswith('graphics passes at ')
+           and said[n].endswith(', as found drawn where it can be') for n in ('Minimize', 'Maximize', 'Close')), said" \
+      "$tmp/decoys.json" \
+      && ok "a11y: contrast, GTK 4: a header bar's icons found drawn where they can be" \
+      || { fail "a11y: contrast, GTK 4, a header bar's icons"; cat "$tmp/decoys.json"; }
+  else
+    echo "skip  a11y: contrast, GTK 4: a header bar's icons: GTK before 4.14.6"
+  fi
   # A theme's font (a seeded gtk.css), which GTK says, over a grid, so
   # nothing is all one lightness, in a window so big that from 4.14.6
   # each label is looked for in more than 600 by 200 pixels.
@@ -1744,6 +1759,24 @@ EOF
         && [ "$(grep -c 'drawn where it is instead' "$tmp/contrast")" = 1 ] \
         && ok "a11y: contrast, GTK 4: an entry row's title not drawn is said so, its twin measured" \
         || { fail "a11y: contrast, GTK 4, entry row titles"; cat "$tmp/contrast"; }
+      # The default theme's buttons, shadowed, their corners rounded and
+      # antialiased a pixel or two in, in a box padded 12 px: each edge
+      # found framed 12,12 px from where GTK says, at a color unlike
+      # what's round it.
+      "$sb" run --a11y -- sh -c "'$here/gtk4_window.py' themed & '$sb' wait window gtk4-themed >/dev/null &&
+        sleep 1 && '$sb' a11y contrast --edges 3 --passes --json --window gtk4-themed" \
+        < /dev/null > "$tmp/themed.json" 2> "$tmp/err" || true
+      python3 -c "import json, re, sys; j = json.load(open(sys.argv[1]))
+said = {n['name']: n.get('problem') or n.get('contrast') for k in ('problems', 'passes') for n in j[k]
+        if (n.get('problem') or n.get('contrast')).startswith('edge ')}
+for n in ('Ok', 'Apply', 'Cancel'):
+    c = re.fullmatch(r'edge (passes at )?[0-9.]+:1, (#[0-9a-f]{6}) by (#[0-9a-f]{6}) \\(at least 3\\); '
+                     r'moved 12,12 px, as found drawn where it can be', said.get(n, ''))
+    assert c and c[2] != c[3], said" "$tmp/themed.json" \
+        && ok "a11y: contrast --edges, GTK 4: the default theme's buttons found framed where they are" \
+        || { fail "a11y: contrast --edges, GTK 4, the default theme's buttons"; cat "$tmp/themed.json" "$tmp/err"; }
+    else
+      echo "skip  a11y: contrast --edges, GTK 4: the default theme's buttons: GTK 4.$minor.$micro, before 4.14.6"
     fi
     # GTK's scrolled list: rows scrolled out of view, which GTK calls
     # showing, above the list but in the window, and below the window,
@@ -1785,129 +1818,6 @@ EOF
       && [ "$(wc -l < "$tmp/contrast")" = 7 ] \
       && ok "a11y: contrast, GTK 4 from 4.14: text where it's found, a stack's too; not a popover or an edge, said" \
       || { fail "a11y: contrast, GTK 4 from 4.14 ($st)"; cat "$tmp/contrast"; }
-  fi
-  # A GTK 4 graphic is measured where text found near it was moved to, if
-  # no container between them has room (padding, or not) and something's
-  # drawn there: its own colors, the CSS's (gtk4_window.py anchored). Not
-  # where nothing's drawn, or only an icon off its middle, nor partly
-  # scrolled out, as GTK says or as it's drawn; through a box with no
-  # room, as if it weren't there; a blink, both its colors.
-  if [ "$minor" -gt 14 ] || { [ "$minor" = 14 ] && [ "$micro" -ge 6 ]; }; then
-    "$sb" run --a11y -- sh -c "'$here/gtk4_window.py' anchored & '$sb' wait window gtk4-anchored >/dev/null &&
-      sleep 1 && '$sb' a11y contrast --passes --window gtk4-anchored --json" > "$tmp/anchored" 2>/dev/null || true
-    python3 - "$tmp/anchored" <<'PY' && ok "a11y: contrast, GTK 4 graphics where text found near them puts them, if certain" \
-      || { fail "a11y: contrast, GTK 4 graphics placed by text found near them"; cat "$tmp/anchored"; }
-import json, re, sys
-got = json.load(open(sys.argv[1]))
-said = {n["name"]: n.get("problem") or n.get("contrast") or n.get("note")
-        for k in ("problems", "passes", "notes") for n in got[k]}
-def near(line, fore, back):
-    c = re.search(r"(#[0-9a-f]{6}) on (#[0-9a-f]{6})", line or "")
-    return c and all(abs(int(a[i:i + 2], 16) - int(b[i:i + 2], 16)) <= 8
-                     for a, b in zip(c.groups(), (fore, back)) for i in (1, 3, 5))
-moved = "; moved 7,9 px, as text found near it was"
-bad = [m for m, ok in [
-    ("Faint", near(said.get("Faint"), "#b0b0b0", "#c0c0c0") and said["Faint"].startswith("graphics 1.")
-     and said["Faint"].endswith(moved) and "where text found near it was moved to" in next(
-         n.get("why", "") for n in got["problems"] if n["name"] == "Faint")),
-    ("Dark", near(said.get("Dark"), "#101010", "#e0e0e0") and said["Dark"].startswith("graphics passes")
-     and said["Dark"].endswith(moved)),
-    ("Nested", near(said.get("Nested"), "#101010", "#e0e0e0")
-     and said["Nested"].startswith("graphics passes") and said["Nested"].endswith(moved)),
-    ("Over", said.get("Over") == "graphics not measured: GTK 4 reports its position wrong "
-     "(partly out of view)"),
-    ("Blank", said.get("Blank") == "graphics not measured: GTK 4 reports its position wrong "
-     "(nothing drawn where text near it puts it)"),
-    ("Aside", said.get("Aside") == "graphics not measured: GTK 4 reports its position wrong "
-     "(no control drawn where text near it puts it)"),
-    ("Away", said.get("Away") == "graphics not measured: GTK 4 reports its position wrong "
-     "(partly out of view)"),
-    ("Pulse", (said.get("Pulse") or "").startswith("graphics changing:"))] if not ok]
-print(*bad, *[f"{k}: {v}" for k, v in said.items()], sep="\n")
-sys.exit(bool(bad))
-PY
-    # With no text near to go by, where it's found drawn within the room
-    # its containers have, as most of its siblings are: an icon off its
-    # middle where they are, but not one far off it; none where they don't
-    # agree, or most aren't found, so far in that a neighbor could be
-    # found for it, or partly scrolled out.
-    python3 - "$tmp/anchored" <<'PY' && ok "a11y: contrast, GTK 4 graphics where they and their siblings are found drawn" \
-      || { fail "a11y: contrast, GTK 4 graphics found drawn"; cat "$tmp/anchored"; }
-import json, re, sys
-got = json.load(open(sys.argv[1]))
-said = {n["name"]: n.get("problem") or n.get("contrast") or n.get("note")
-        for k in ("problems", "passes", "notes") for n in got[k]}
-def at(name, dx, dy, fore="#101010", back="#e0e0e0", problem=False):
-    line = said.get(name) or ""
-    c = re.search(r"(#[0-9a-f]{6}) on (#[0-9a-f]{6})", line)
-    return (c and all(abs(int(a[i:i + 2], 16) - int(b[i:i + 2], 16)) <= 8
-                      for a, b in zip(c.groups(), (fore, back)) for i in (1, 3, 5))
-            and line.startswith("graphics 1." if problem else "graphics passes")
-            and line.endswith(f"; moved {dx},{dy} px, as found drawn where it can be"))
-def noted(name, why):
-    return said.get(name) == f"graphics not measured: GTK 4 reports its position wrong ({why})"
-bad = [m for m, ok in [
-    ("Beside", at("Beside", 7, 9)),
-    ("Up", at("Up", 12, 9)), ("Shut", at("Shut", 12, 9)), ("Even", at("Even", 12, 9)),
-    ("Low", at("Low", 12, 9, back="#f6f5f4")),
-    ("Askew", noted("Askew", "not found drawn where it can be")),
-    ("Lone", noted("Lone", "not found drawn where it can be")),
-    ("Left", noted("Left", "not found drawn where it can be")),
-    ("Right", noted("Right", "not found drawn where it can be")),
-    ("Pale", at("Pale", 12, 9, "#b0b0b0", "#c0c0c0", problem=True)
-     and "where it and most of its siblings are found drawn" in next(
-         n.get("why", "") for n in got["problems"] if n["name"] == "Pale")),
-    ("Bold", at("Bold", 12, 9)),
-    ("Hid", noted("Hid", "partly out of view")), ("Roomy", at("Roomy", 7, 9)),
-    ("Roomier", noted("Roomier", "too much room round it to find it"))] if not ok]
-print(*bad, *[f"{k}: {v}" for k, v in said.items()], sep="\n")
-sys.exit(bool(bad))
-PY
-    # An edge where it's found framed exactly, at the move most of its
-    # siblings are found at (gtk4_window.py edged): one framed where a
-    # sibling of its size is too, a faint one, a thick one, a wide one. Not
-    # one drawn flat; nor framed elsewhere than most, or where no move has
-    # most; nor where another control can be; nor focused, its ring on its
-    # edge; nor a field's faint edge, as what it's in might draw one; nor
-    # one partly scrolled out; nor a flat one beside a disabled one.
-    "$sb" run --a11y -- sh -c "'$here/gtk4_window.py' edged & '$sb' wait window gtk4-edged >/dev/null &&
-      sleep 1 && '$sb' a11y contrast --edges 3 --passes --window gtk4-edged --json" > "$tmp/edged" 2>/dev/null || true
-    python3 - "$tmp/edged" <<'PY' && ok "a11y: contrast --edges, GTK 4 where found framed exactly, as most of its siblings are" \
-      || { fail "a11y: contrast --edges, GTK 4 found framed"; cat "$tmp/edged"; }
-import json, sys
-got = json.load(open(sys.argv[1]))
-said = {n["name"]: n for k in ("problems", "passes", "notes") for n in got[k]
-        if (n.get("problem") or n.get("contrast") or n.get("note")).startswith("edge")}
-def at(name, edge="#404040", problem=False):
-    line = (said.get(name) or {}).get("problem" if problem else "contrast") or ""
-    return (line.startswith("edge 1." if problem else "edge passes at ")
-            and f"{edge} by #f0f0f0 " in line
-            and line.endswith("; moved 7,9 px, as found drawn where it can be"))
-def noted(name, why):
-    return (said.get(name) or {}).get("note") == \
-        f"edge not measured: GTK 4 reports its position wrong ({why})"
-apart = "its siblings found framed in different places"
-bad = [m for m, ok in [
-    ("Ok", at("Ok")), ("Apply", at("Apply")), ("Thick", at("Thick")),
-    ("Faintly", at("Faintly", "#d0d0d0", problem=True)
-     and "found framed exactly" in said["Faintly"].get("why", "")),
-    ("Plain", noted("Plain", "no edge found drawn where it can be")),
-    *[(n, noted(n, apart)) for n in ("Most", "More", "Shifted", "Further")],
-    ("Agree", at("Agree")), ("Also", at("Also")), ("Again", at("Again")),
-    ("Apart", noted("Apart", "found framed elsewhere than most of its siblings")),
-    ("Wide", at("Wide")),
-    *[(n, noted(n, "no edge found drawn where it can be")) for n in ("Tall", "Short", "Bevel")],
-    ("Typing", noted("Typing", "its focus ring is drawn on its edge")),
-    ("Pale field", noted("Pale field", "its own edge is faint, and what it's in can't be placed")),
-    ("Twin", noted("Twin", "found framed in more than one place")),
-    *[(n, noted(n, "found framed where another control can be")) for n in ("Hover", "Off")],
-    ("Hid", noted("Hid", "partly out of view"))] if not ok]
-print(*bad, *[f"{k}: {v.get('problem') or v.get('contrast') or v.get('note')}"
-              for k, v in said.items()], sep="\n")
-sys.exit(bool(bad))
-PY
-  else
-    echo "skip  a11y: contrast, GTK 4 graphics placed by text found near them: GTK 4.$minor.$micro, before 4.14.6"
   fi
   sb=$live_sb
   same=$(grep -c '^same ' "$tmp/replayed/said" 2>/dev/null || true)
