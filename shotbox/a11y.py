@@ -3239,6 +3239,15 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
             behind.append((n, f"{k} behind a modal dialog {name}"))
         return bool(m)
 
+    def gone(n, k, why):
+        """Whether GTK 4's `n`, said partly out of view, is all out of it,
+        as a row scrolled out of view is: noted not shown if so."""
+        if why != "partly out of view" or not out_of_view(n):
+            return False
+        hidden.add(n.path)
+        notes.append((n, f"{k} not measured: not shown (scrolled out of view, or hidden)"))
+        return True
+
     def wrong(n, k, why=None):
         """Whether `n` is GTK 4's, whose positions are wrong: noted if so,
         with `why` it wasn't found."""
@@ -3378,7 +3387,7 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
             if isinstance(lent, str):
                 lent, why = None, lent
         seen = seen or lent
-        if not seen and wrong(n, k, why):
+        if not seen and (gone(n, k, why) or wrong(n, k, why)):
             continue
         if not n.bounds:
             if "_run" in n or n.get("_drawn", True):
@@ -3586,7 +3595,8 @@ def contrast(window=None, text=4.5, graphics=3.0, edges=None, timeout=10, ignore
             if live_only(n, "edge"):
                 continue
             at = placed.get(n.path)
-            if isinstance(at, str) and wrong(n, "edge", at) or not at and wrong(n, "edge"):
+            if isinstance(at, str) and (gone(n, "edge", at) or wrong(n, "edge", at)) \
+                    or not at and wrong(n, "edge"):
                 continue
             b = n.bounds
             box = [b[0] + at[0], b[1] + at[1], *b[2:]] if at else shown(n)

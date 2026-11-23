@@ -52,6 +52,12 @@
   fonts it knows by name (a bare Ubuntu, say). Their labels, and the
   numbers on the MCP server's labeled screenshots, are now written in
   fontconfig's sans font.
+- `a11y contrast --strict` failed a GTK 4 control (from 4.14.6) scrolled
+  all out of view, `graphics not measured: GTK 4 reports its position
+  wrong (partly out of view)`, where its label is `not shown (scrolled
+  out of view, or hidden)` and doesn't fail. The control is now noted not
+  shown too, and its edge, which `--strict` leaves out; one partly out of
+  view still fails.
 
 ## 0.12.0 — 2026-11-12
 
